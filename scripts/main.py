@@ -4,18 +4,20 @@ from math import sqrt,inf
 import numpy as np
 from shapely.geometry import shape, mapping, LineString
 
-with fiona.open("data/meandry_leva.shp") as levy_breh:
+with fiona.open("data/vzorecek_leva.shp") as levy_breh:
     linestring_left=shape(levy_breh[0]['geometry'])
         
         
-with fiona.open("data/meandry_prava.shp") as pravy_breh:
+with fiona.open("data/vzorecek_prava.shp") as pravy_breh:
     linestring_right=shape(pravy_breh[0]['geometry'])
     
-seg_linestring_left=shapely.segmentize(linestring_left,inf)
-seg_linestring_right=shapely.segmentize(linestring_right,inf)
+seg_linestring_left=shapely.segmentize(linestring_left,25)
+seg_linestring_right=shapely.segmentize(linestring_right,25)
 
 array_left=np.array(seg_linestring_left.coords)
+print(len(array_left))
 array_right=np.array(seg_linestring_right.coords)
+print(len(array_right))
 
 class NearestNeighborsCouple (object):
     def __init__(self, p_point, query_point, distance):
@@ -40,21 +42,45 @@ def get_nn_list(p_points, q_points):
         nn.append(nnc)
     return nn
 
-nn_lr=get_nn_list(array_right,array_left)
-nn_rl=get_nn_list(array_left,array_right)
-pricky=np.array([])
-print (len(nn_lr))
-print (len(nn_rl))
-for item_lr in nn_lr:
+pricky=[]
 
-    for item_rl in nn_rl:
-        #print (item_rl.p)
-        if all(item_rl.p==item_lr.q) and all(item_rl.q==item_lr.p):
-            pricka=LineString([item_lr.p,item_lr.q])
-            #print (pricka)
-            pricky=np.append(pricky, pricka)
-print (len(pricky))
+while True:
+    nn_lr=get_nn_list(array_right,array_left)
+    nn_rl=get_nn_list(array_left,array_right)
 
+    #print (len(nn_lr))
+    #print (len(nn_rl))
+    for item_lr in nn_lr:
+        #print(item_lr.q)
+        for item_rl in nn_rl:
+            #print (item_rl.p)
+            if all(item_rl.p==item_lr.q) and all(item_rl.q==item_lr.p):
+                pricka=LineString([item_lr.p,item_lr.q])
+                #print (pricka)
+                #pricky=np.append(pricky, pricka)
+                pricky.append(pricka)
+                row_to_remove_left = item_lr.q
+                mask_left = np.any(array_left != row_to_remove_left, axis=1)
+                array_left = array_left[mask_left]
+                
+                row_to_remove_right = item_lr.p
+                mask_right = np.any(array_right != row_to_remove_right, axis=1)
+                array_right = array_right[mask_right]
+                
+    if len(array_right) == 0 or len(array_left) == 0:
+        break
+    print(len(pricky))
+for pricka in pricky:
+    kolize_left=shapely.intersection(pricka,linestring_left,grid_size=0.00001)
+    if type(kolize_left)==shapely.geometry.multipoint.MultiPoint:
+        pricky.remove(pricka)
+    else:
+        kolize_right=shapely.intersection(pricka,linestring_right,grid_size=0.00001)
+        if type(kolize_right)==shapely.geometry.multipoint.MultiPoint:
+            pricky.remove(pricka)
+    
+print(len(array_left))
+print(len(array_right))
 schema = {
     'geometry': 'LineString',
     'properties': {'id': 'int'},
