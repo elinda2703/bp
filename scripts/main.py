@@ -15,6 +15,7 @@ seg_linestring_left=shapely.segmentize(linestring_left,25)
 seg_linestring_right=shapely.segmentize(linestring_right,25)
 
 array_left=np.array(seg_linestring_left.coords)
+array_left=np.flipud(array_left)
 print(len(array_left))
 array_right=np.array(seg_linestring_right.coords)
 print(len(array_right))
@@ -43,6 +44,8 @@ def get_nn_list(p_points, q_points):
     return nn
 
 pricky=[]
+left_splits=[]
+right_splits=[]
 
 while True:
     nn_lr=get_nn_list(array_right,array_left)
@@ -59,6 +62,22 @@ while True:
                 #print (pricka)
                 #pricky=np.append(pricky, pricka)
                 pricky.append(pricka)
+                left_index = np.where(np.all(array_left == item_lr.q, axis=1))[0][0]
+                right_index = np.where(np.all(array_right == item_lr.p, axis=1))[0][0]
+                left_splits.append(left_index)
+                right_splits.append(right_index)
+                #asi checknout krizeni
+                #tady to splitnu --> list arrayu
+                array_list_left = np.split(array_left, left_splits)
+                array_list_right = np.split(array_right, right_splits)
+                #smazu pouzity vertexy
+                for arr in array_list_left[1:]:
+                    arr=np.delete(arr,[0],axis=0)
+                for arr in array_list_right[1:]:
+                    arr=np.delete(arr,[0],axis=0)
+                #for array in list to pobezi cely znova unless neco
+                
+                """
                 row_to_remove_left = item_lr.q
                 mask_left = np.any(array_left != row_to_remove_left, axis=1)
                 array_left = array_left[mask_left]
@@ -66,21 +85,21 @@ while True:
                 row_to_remove_right = item_lr.p
                 mask_right = np.any(array_right != row_to_remove_right, axis=1)
                 array_right = array_right[mask_right]
-                
+                """
     if len(array_right) == 0 or len(array_left) == 0:
         break
-    print(len(pricky))
+"""
+print(len(pricky))
 for pricka in pricky:
-    kolize_left=shapely.intersection(pricka,linestring_left,grid_size=0.00001)
-    if type(kolize_left)==shapely.geometry.multipoint.MultiPoint:
+    kolize_right=shapely.intersection(pricka,linestring_right)
+    if type(kolize_right)==shapely.geometry.multipoint.MultiPoint:
         pricky.remove(pricka)
     else:
-        kolize_right=shapely.intersection(pricka,linestring_right,grid_size=0.00001)
-        if type(kolize_right)==shapely.geometry.multipoint.MultiPoint:
+        kolize_left=shapely.intersection(pricka,linestring_left)
+        if type(kolize_left)==shapely.geometry.multipoint.MultiPoint:
             pricky.remove(pricka)
-    
-print(len(array_left))
-print(len(array_right))
+"""
+print(len(pricky))    
 schema = {
     'geometry': 'LineString',
     'properties': {'id': 'int'},
