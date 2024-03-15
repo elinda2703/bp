@@ -43,16 +43,30 @@ def get_nn_list(p_points, q_points):
         nn.append(nnc)
     return nn
 
-pricky=[]
-left_splits=[]
-right_splits=[]
+"""
+def get_splits
+def delete_used
+def delete_unpairable
 
-while True:
+
+
+"""
+
+
+#pricky=[]
+
+
+def get_all_pricky(array_left,array_right,pricky=None):
+    if pricky is None:
+        pricky = []
     nn_lr=get_nn_list(array_right,array_left)
     nn_rl=get_nn_list(array_left,array_right)
 
+    left_splits=[]
+    right_splits=[]
     #print (len(nn_lr))
     #print (len(nn_rl))
+    
     for item_lr in nn_lr:
         #print(item_lr.q)
         for item_rl in nn_rl:
@@ -66,28 +80,39 @@ while True:
                 right_index = np.where(np.all(array_right == item_lr.p, axis=1))[0][0]
                 left_splits.append(left_index)
                 right_splits.append(right_index)
-                #asi checknout krizeni
-                #tady to splitnu --> list arrayu
-                array_list_left = np.split(array_left, left_splits)
-                array_list_right = np.split(array_right, right_splits)
-                #smazu pouzity vertexy
-                for arr in array_list_left[1:]:
-                    arr=np.delete(arr,[0],axis=0)
-                for arr in array_list_right[1:]:
-                    arr=np.delete(arr,[0],axis=0)
+    #asi checknout krizeni
+    
+    #tady to splitnu --> list arrayu
+    array_list_left = np.split(array_left, left_splits)
+    array_list_right = np.split(array_right, right_splits)
+    #smazu pouzity vertexy
+    array_list_left_1=[array_list_left[0]]
+    for arr in array_list_left[1:]:
+        if len(arr)!=0:
+            arr=np.delete(arr,[0],axis=0)
+        array_list_left_1.append(arr)
+                        
+    array_list_right_1=[array_list_right[0]]
+    for arr in array_list_right[1:]:
+        if len(arr)!=0:
+            arr=np.delete(arr,[0],axis=0)
+        array_list_right_1.append(arr)
+    array_list_left_2=[]
+    array_list_right_2=[]
+                
+    for left,right in zip(array_list_left_1,array_list_right_1):
+        if left.size!=0 and right.size!=0:
+            array_list_left_2.append(left)
+            array_list_right_2.append(right)
                 #for array in list to pobezi cely znova unless neco
-                
-                """
-                row_to_remove_left = item_lr.q
-                mask_left = np.any(array_left != row_to_remove_left, axis=1)
-                array_left = array_left[mask_left]
-                
-                row_to_remove_right = item_lr.p
-                mask_right = np.any(array_right != row_to_remove_right, axis=1)
-                array_right = array_right[mask_right]
-                """
-    if len(array_right) == 0 or len(array_left) == 0:
-        break
+
+    if len (array_list_left_2) != 0 or len(array_list_right_2)!=0:
+        for left,right in zip(array_list_left_2,array_list_right_2):
+            get_all_pricky(left,right,pricky)
+    return pricky
+
+
+pricky_final=get_all_pricky(array_left,array_right)        
 """
 print(len(pricky))
 for pricka in pricky:
@@ -99,7 +124,7 @@ for pricka in pricky:
         if type(kolize_left)==shapely.geometry.multipoint.MultiPoint:
             pricky.remove(pricka)
 """
-print(len(pricky))    
+print(len(pricky_final))    
 schema = {
     'geometry': 'LineString',
     'properties': {'id': 'int'},
@@ -108,7 +133,7 @@ schema = {
 with fiona.open('data/vysledek.shp', 'w', 'ESRI Shapefile', schema) as c:
     ## If there are multiple geometries, put the "for" loop here
     x=0
-    for item in pricky:
+    for item in pricky_final:
         c.write({
             'geometry': mapping(item),
             'properties': {'id': x},
