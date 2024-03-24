@@ -3,12 +3,13 @@ import shapely
 from math import sqrt,inf
 import numpy as np
 from shapely.geometry import shape, mapping, LineString
+from matplotlib import pyplot as plt 
 
-with fiona.open("data/vzorecek_leva.shp") as levy_breh:
+with fiona.open("data/meandry_leva.shp") as levy_breh:
     linestring_left=shape(levy_breh[0]['geometry'])
         
         
-with fiona.open("data/vzorecek_prava.shp") as pravy_breh:
+with fiona.open("data/meandry_prava.shp") as pravy_breh:
     linestring_right=shape(pravy_breh[0]['geometry'])
     
 seg_linestring_left=shapely.segmentize(linestring_left,25)
@@ -43,18 +44,6 @@ def get_nn_list(p_points, q_points):
         nn.append(nnc)
     return nn
 
-"""
-def get_splits
-def delete_used
-def delete_unpairable
-
-
-
-"""
-
-
-#pricky=[]
-
 
 def get_all_pricky(array_left,array_right,left_start,right_start,left_end,right_end,pricky=None):
     if pricky is None:
@@ -74,13 +63,13 @@ def get_all_pricky(array_left,array_right,left_start,right_start,left_end,right_
             if all(item_rl.p==item_lr.q) and all(item_rl.q==item_lr.p):
                 left_index = np.where(np.all(array_left == item_lr.q, axis=1))[0][0]
                 right_index = np.where(np.all(array_right == item_lr.p, axis=1))[0][0]
-                pricka=LineString([item_lr.p,item_lr.q])
+                pricka=[item_lr.p,item_lr.q]
                 #print (pricka)
                 #pricky=np.append(pricky, pricka)
                 pricky[left_index]=pricka
                 left_splits.append(left_index)
                 right_splits.append(right_index)
-    print(len(pricky))
+    #print(len(pricky))
     #asi checknout krizeni    
     left_splits.append(left_end)
     right_splits.append(right_end)
@@ -104,34 +93,52 @@ def get_all_pricky(array_left,array_right,left_start,right_start,left_end,right_
 
 
 pricky_final=get_all_pricky(array_left,array_right,0,0,len(array_left),len(array_right))        
-"""
-print(len(pricky))
-for pricka in pricky:
-    kolize_right=shapely.intersection(pricka,linestring_right)
-    if type(kolize_right)==shapely.geometry.multipoint.MultiPoint:
-        pricky.remove(pricka)
-    else:
-        kolize_left=shapely.intersection(pricka,linestring_left)
-        if type(kolize_left)==shapely.geometry.multipoint.MultiPoint:
-            pricky.remove(pricka)
-"""
+
 sorted_pricky_final = dict(sorted(pricky_final.items()))
 
-final_array=np.array(sorted_pricky_final.values())
+sorted_pricky_list=list(sorted_pricky_final.values())
 
-print(final_array)
+final_array=np.array(sorted_pricky_list)
+
+widths = np.linalg.norm(np.diff(final_array, axis=1), axis=-1)
+
+banks=final_array.swapaxes(0,1)
+
+skoro_kilometraz=np.linalg.norm(np.diff(banks, axis=1), axis=-1)
+
+distances_between_transects=np.mean(skoro_kilometraz,axis=0)/1000
+
+cum_km=np.cumsum(distances_between_transects)
+
+cum_km0=np.insert(cum_km,0,0)
+
+plt.title("Matplotlib demo") 
+plt.xlabel("kilometrage (km)") 
+plt.ylabel("river width (m)") 
+plt.plot(cum_km0,widths) 
+plt.show()
+
+
 
 #print(pricky_final)    
 schema = {
     'geometry': 'LineString',
-    'properties': {'id': 'int'},
 }
 # Write a new Shapefile
 with fiona.open('data/vysledek.shp', 'w', 'ESRI Shapefile', schema) as c:
     ## If there are multiple geometries, put the "for" loop here
 
-    for key,value in sorted_pricky_final.items():
+    for pricka in final_array:
+        pricka_linestring=LineString(pricka)
         c.write({
-            'geometry': mapping(value),
-            'properties': {'id': int(key)},
+            'geometry': mapping(pricka_linestring),
+        })
+
+with fiona.open('data/novy_brehy.shp', 'w', 'ESRI Shapefile', schema) as c:
+    ## If there are multiple geometries, put the "for" loop here
+
+    for bank in banks:
+        bank_linestring=LineString(bank)
+        c.write({
+            'geometry': mapping(bank_linestring),
         })
