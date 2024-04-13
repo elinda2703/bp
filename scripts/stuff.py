@@ -26,7 +26,7 @@ seg_linestring_right=shapely.segmentize(linestring_right,5)
 array_left=np.array(seg_linestring_left.coords)
 print(len(array_left))
 array_right=np.array(seg_linestring_right.coords)
-#array_right=np.flipud(array_right)
+
 print(len(array_right))
 #array_islands=np.array(seg_linestring_islands.coords)
 #https://stackoverflow.com/questions/12369484/searching-for-k-nearest-points
@@ -53,12 +53,13 @@ unique_r_indices,closest_l_indices=get_unique_shortest(distances_lr,indices_r)
 neigh.fit(array_left)
 distances_rl,indices_l=neigh.kneighbors(array_right)
 
-unique_l_indices,closest_r_indices=get_unique_shortest(distances_lr,indices_r)
+unique_l_indices,closest_r_indices=get_unique_shortest(distances_rl,indices_l)
 
 for left_index1,right_index1 in zip(closest_l_indices,unique_r_indices):
     for right_index2,left_index2 in zip(closest_r_indices,unique_l_indices):
         if right_index1==right_index2 and left_index2==left_index1:
             pricka=[array_right[right_index1],array_left[left_index1]]
+            print(pricka)
             pricky_rl.append(pricka)
 
 
