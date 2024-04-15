@@ -9,15 +9,27 @@ from sklearn.neighbors import NearestNeighbors
 
 start=time.time()
 
-with fiona.open("data/vzorecek_leva.shp") as levy_breh:
+with fiona.open("data/meandry_leva.shp") as levy_breh:
     linestring_left=shape(levy_breh[0]['geometry'])
         
         
-with fiona.open("data/vzorecek_prava.shp") as pravy_breh:
+with fiona.open("data/meandry_prava.shp") as pravy_breh:
     linestring_right=shape(pravy_breh[0]['geometry'])
     
-"""with fiona.open("data/vzorecek_ostrovy.shp") as ostrovy:
-    linestring_islands=shape(ostrovy[2]['geometry'])"""
+islands=[]
+
+with fiona.open("data/orlice_25_ostrovy.shp") as ostrovy:
+    for feature in ostrovy:
+        linestring_islands=shape(feature['geometry'])
+        islands.append(linestring_islands)
+
+def segmenty_array(vstup):
+    segmentized=shapely.segmentize(vstup,25)
+    arrayed=np.array(segmentized.coords)
+    return arrayed
+    
+       
+seg_islands=list(map(segmenty_array,islands))
     
 seg_linestring_left=shapely.segmentize(linestring_left,25)
 seg_linestring_right=shapely.segmentize(linestring_right,25)
@@ -115,7 +127,7 @@ def get_all(array_left,array_right,left_start,right_start,left_end,right_end,pri
     for left_split in left_splits[1:]:
         lr_lower=closest_l_indices.index(lower_id_left)
         lr_upper=closest_l_indices.index(left_split)
-        
+        #np where :) a smrdis
         rl_lower=unique_l_indices.tolist().index(lower_id_left)
         rl_upper=unique_l_indices.tolist().index(left_split)
         
