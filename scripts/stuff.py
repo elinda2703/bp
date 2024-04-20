@@ -24,15 +24,15 @@ with fiona.open("data/orlice_25_ostrovy.shp") as ostrovy:
         islands.append(linestring_islands)
 
 def segmenty_array(vstup):
-    segmentized=shapely.segmentize(vstup,25)
+    segmentized=shapely.segmentize(vstup,5)
     arrayed=np.array(segmentized.coords)
     return arrayed
     
        
 seg_islands=list(map(segmenty_array,islands))
     
-seg_linestring_left=shapely.segmentize(linestring_left,25)
-seg_linestring_right=shapely.segmentize(linestring_right,25)
+seg_linestring_left=shapely.segmentize(linestring_left,5)
+seg_linestring_right=shapely.segmentize(linestring_right,5)
 #seg_linestring_islands=shapely.segmentize(linestring_islands,25)
 
 array_left=np.array(seg_linestring_left.coords)
@@ -63,11 +63,17 @@ with fiona.open('data/seg_pravy.shp', 'w', 'ESRI Shapefile', schema_point) as c:
         c.write({
             'geometry': mapping(breh_point),
         })
-        
-        
-#array_islands=np.array(seg_linestring_islands.coords)
-#https://stackoverflow.com/questions/12369484/searching-for-k-nearest-points
-neigh = NearestNeighbors(n_neighbors=1)
+right_bank_plus_islands=np.concatenate((array_right,*seg_islands),axis=0)
+left_bank_plus_islands=np.concatenate((array_left,*seg_islands),axis=0)        
+
+with fiona.open('data/seg_pravy_plus_islands.shp', 'w', 'ESRI Shapefile', schema_point) as c:
+    ## If there are multiple geometries, put the "for" loop here
+
+    for breh in right_bank_plus_islands:
+        breh_point=Point(breh)
+        c.write({
+            'geometry': mapping(breh_point),
+        })
 
 def get_unique_shortest(distances,pop_indices):
     unique_pop_indices = np.unique(pop_indices)
@@ -76,29 +82,84 @@ def get_unique_shortest(distances,pop_indices):
         indices_pop_indices = np.where(pop_indices == pop_index)[0]
         closest_query_index = indices_pop_indices[np.argmin(distances[indices_pop_indices])]
         closest_query_indices.append(closest_query_index)
+    closest_query_indices=np.array(closest_query_indices)
     return unique_pop_indices,closest_query_indices
 
-def get_all(array_left,array_right,left_start,right_start,left_end,right_end,pricky=None):
+def get_duplicates(array1,array2):
+    all_values=np.concatenate((array1,array2),axis=0)
+    unique_values,unique_count=np.unique(all_values,return_counts=True,axis=0)
+    duplicates=unique_values[unique_count==2]
+    return duplicates
     
-    if pricky==None:
-        pricky=[]
-        
-    left_splits=[]
-    right_splits=[]
+
+def get_all(array_left,array_right,seg_islands):
     
-    pricky_rl=[]
-    pricky_lr=[]
-
-    neigh.fit(array_right[right_start:right_end])
-    distances_lr,indices_r=neigh.kneighbors(array_left[left_start:left_end])
-
-    unique_r_indices,closest_l_indices=get_unique_shortest(distances_lr,indices_r)
+    neigh = NearestNeighbors(n_neighbors=1)
     
-    neigh.fit(array_left[left_start:left_end])
-    distances_rl,indices_l=neigh.kneighbors(array_right[right_start:right_end])
+    unpacked_islands=np.concatenate((seg_islands),axis=0)
+    right_bank_plus_islands=np.concatenate((array_right,unpacked_islands),axis=0)
+    left_bank_plus_islands=np.concatenate((array_left,unpacked_islands),axis=0)     
 
-    unique_l_indices,closest_r_indices=get_unique_shortest(distances_rl,indices_l)
+    neigh.fit(right_bank_plus_islands) #population = right bank + all islands
+    distances_lr,indices_r=neigh.kneighbors(array_left) #query = left bank
 
+    unique_r_indices,closest_l_indices=get_unique_shortest(distances_lr,indices_r) #unique_r_indices includes islands
+    
+    
+    unique_r_indices_without_islands=unique_r_indices[unique_r_indices<len(array_right)] #to be compared
+    closest_l_indices_without_islands=closest_l_indices[unique_r_indices<len(array_right)] #to be compared
+
+    island_candidates_for_left=unique_r_indices[unique_r_indices>=len(array_right)] #to be compared
+    closest_l_indices_only_islands=closest_l_indices[unique_r_indices>=len(array_right)] #to be compared
+    
+    island_candidates_for_left_adjusted=island_candidates_for_left-len(array_right)
+    
+    
+    left_to_islands=np.stack((array_left[closest_l_indices_only_islands],unpacked_islands[island_candidates_for_left_adjusted]),axis=1)
+
+    
+    neigh.fit(array_left) #population = left bank only
+    distances_islands_to_left,left_indices_for_islands=neigh.kneighbors(unpacked_islands[island_candidates_for_left_adjusted]) #query = only previously chosen island vertices
+       
+    
+    unique_left_indices_to_islands_only,closest_island_indices_to_left=get_unique_shortest(distances_islands_to_left,left_indices_for_islands) #to be compared
+
+    islands_to_left=np.stack((array_left[unique_left_indices_to_islands_only],unpacked_islands[island_candidates_for_left_adjusted][closest_island_indices_to_left]),axis=1)
+    
+    neigh.fit(left_bank_plus_islands) #population = left bank + all islands
+    distances_rl,indices_l=neigh.kneighbors(array_right) #query = right bank
+
+    unique_l_indices,closest_r_indices=get_unique_shortest(distances_rl,indices_l) #unique_l_indices includes islands
+    
+    unique_l_indices_without_islands=unique_l_indices[unique_l_indices<len(array_left)] #to be compared
+    closest_r_indices_without_islands=closest_r_indices[unique_l_indices<len(array_left)] #to be compared
+    
+
+
+    island_candidates_for_right=unique_l_indices[unique_l_indices>=len(array_left)]
+    closest_r_indices_only_islands=closest_r_indices[unique_l_indices>=len(array_left)] #to be compared
+    
+    neigh.fit(array_right) #population = right bank only
+    distances_islands_to_right,right_indices_for_islands=neigh.kneighbors(left_bank_plus_islands[island_candidates_for_right]) #query = only previously chosen island vertices   
+    
+    unique_right_indices_to_islands_only,closest_island_indices_to_right=get_unique_shortest(distances_islands_to_right,right_indices_for_islands) #to be compared
+
+ 
+    all_lr=np.stack((closest_l_indices_without_islands,unique_r_indices_without_islands),axis=1)
+    all_rl=np.stack((unique_l_indices_without_islands,closest_r_indices_without_islands),axis=1)
+    
+    duplicate_transects=get_duplicates(all_lr,all_rl)
+    left_indices,right_indices=np.swapaxes(duplicate_transects,0,1)
+    transects=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)
+    
+    all_left_to_islands=np.stack((closest_l_indices_only_islands,island_candidates_for_left_adjusted),axis=1)
+    all_islands_to_left=np.stack((unique_left_indices_to_islands_only,island_candidates_for_left_adjusted[closest_island_indices_to_left]),axis=1)
+    
+    duplicate_left_islands=get_duplicates(all_left_to_islands,all_islands_to_left)
+    left_indices_is,island_indices_l=np.swapaxes(duplicate_left_islands,0,1)
+    transects_left_islands=np.stack((array_left[left_indices_is],unpacked_islands[island_indices_l]),axis=1)
+    
+    """
     for left_index1,right_index1 in zip(closest_l_indices,unique_r_indices):
         for right_index2,left_index2 in zip(closest_r_indices,unique_l_indices):
             if right_index1==right_index2 and left_index2==left_index1:
@@ -107,7 +168,7 @@ def get_all(array_left,array_right,left_start,right_start,left_end,right_end,pri
                 left_splits.append(left_index)
                 right_splits.append(right_index)
                 pricka=[array_right[right_index],array_left[left_index]]
-                pricky.append(pricka)
+                pricky.append(pricka)"""
     """            
     for right_index,left_index in zip(closest_r_indices,unique_l_indices):
         left_splits.append(left_index)
@@ -120,7 +181,7 @@ def get_all(array_left,array_right,left_start,right_start,left_end,right_end,pri
         right_splits.append(right_index)
         pricka=[array_right[right_index],array_left[left_index]]
         pricky_lr.append(pricka)
-    """    
+  
             
     lower_id_left=left_splits[0]
                 
@@ -147,7 +208,7 @@ def get_all(array_left,array_right,left_start,right_start,left_end,right_end,pri
                     pricka=[array_right[right_index],array_left[left_index]]
                     pricky_rl.append(pricka)
     
-    """       
+        
     left_splits.append(left_end)
     right_splits.append(right_end)
     
@@ -166,15 +227,17 @@ def get_all(array_left,array_right,left_start,right_start,left_end,right_end,pri
         upper_index_right=right_split    
         if upper_index_left-lower_index_left >=10 and upper_index_right-lower_index_right >=10:
             get_all(array_left,array_right,lower_index_left,lower_index_right,upper_index_left,upper_index_right,pricky)"""
-    return pricky_rl,pricky_lr,pricky
+    return left_to_islands,islands_to_left,transects_left_islands
 
-pricky_final_rl,pricky_final_lr,pricky_final=get_all(array_left,array_right,0,0,len(array_left),len(array_right))
+left_islands_final,islands_to_left_final,trasects_left_islands_final=get_all(array_left,array_right,seg_islands)
+
+
     
 schema_line = {
     'geometry': 'LineString',
 }
 # Write a new Shapefile
-
+"""
 with fiona.open('data/vysledek_lr.shp', 'w', 'ESRI Shapefile', schema_line) as c:
     ## If there are multiple geometries, put the "for" loop here
 
@@ -193,11 +256,29 @@ with fiona.open('data/vysledek_rl.shp', 'w', 'ESRI Shapefile', schema_line) as c
         c.write({
             'geometry': mapping(pricka_linestring),
         })
-
-with fiona.open('data/vysledek_pokusicek2.shp', 'w', 'ESRI Shapefile', schema_line) as c:
+"""
+with fiona.open('data/vysledek_pokusicek3.shp', 'w', 'ESRI Shapefile', schema_line) as c:
     ## If there are multiple geometries, put the "for" loop here
 
-    for pricka in pricky_final:
+    for pricka in left_islands_final:
+        pricka_linestring=LineString(pricka)
+        c.write({
+            'geometry': mapping(pricka_linestring),
+        })
+
+with fiona.open('data/vysledek_pokusicek4.shp', 'w', 'ESRI Shapefile', schema_line) as c:
+    ## If there are multiple geometries, put the "for" loop here
+
+    for pricka in islands_to_left_final:
+        pricka_linestring=LineString(pricka)
+        c.write({
+            'geometry': mapping(pricka_linestring),
+        })
+
+with fiona.open('data/vysledek_pokusicek5.shp', 'w', 'ESRI Shapefile', schema_line) as c:
+    ## If there are multiple geometries, put the "for" loop here
+
+    for pricka in trasects_left_islands_final:
         pricka_linestring=LineString(pricka)
         c.write({
             'geometry': mapping(pricka_linestring),
