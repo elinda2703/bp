@@ -74,6 +74,8 @@ with fiona.open('data/seg_pravy_plus_islands.shp', 'w', 'ESRI Shapefile', schema
         c.write({
             'geometry': mapping(breh_point),
         })
+neigh = NearestNeighbors(n_neighbors=1)
+
 
 def get_unique_shortest(distances,pop_indices):
     unique_pop_indices = np.unique(pop_indices)
@@ -91,31 +93,59 @@ def get_duplicates(array1,array2):
     duplicates=unique_values[unique_count==2]
     return duplicates
     
+def get_indices_onesided(queries,*population):
+    population_merged=np.vstack(population)
+    neigh.fit(population_merged) #population = right bank + all islands
+    distances,indices_to=neigh.kneighbors(queries) #query = left bank
+
+    unique_to_indices,closest_from_indices=get_unique_shortest(distances,indices_to) #unique_r_indices includes islands
+    
+    return closest_from_indices,unique_to_indices
+
+def get_filter(to_bank,unique_to_indices):    
+    without_islands_filter=unique_to_indices<len(to_bank)
+    islands_only_filter=unique_to_indices>=len(to_bank)
+    return without_islands_filter,islands_only_filter
+
+def filter_by_islands(from_indices,to_indices,island_filter):
+
+    final_from_indices=from_indices[island_filter] #to be compared
+    final_to_indices=to_indices[island_filter] #to be compared
+        
+    return final_from_indices,final_to_indices
+
+
+    
+    
 
 def get_all(array_left,array_right,seg_islands):
     
-    neigh = NearestNeighbors(n_neighbors=1)
+    
     
     unpacked_islands=np.concatenate((seg_islands),axis=0)
-    right_bank_plus_islands=np.concatenate((array_right,unpacked_islands),axis=0)
-    left_bank_plus_islands=np.concatenate((array_left,unpacked_islands),axis=0)     
 
-    neigh.fit(right_bank_plus_islands) #population = right bank + all islands
-    distances_lr,indices_r=neigh.kneighbors(array_left) #query = left bank
-
-    unique_r_indices,closest_l_indices=get_unique_shortest(distances_lr,indices_r) #unique_r_indices includes islands
+    
+    from_left,to_right_plus_islands_unique=get_indices_onesided(array_left,array_right,unpacked_islands)
+         
+    without_islands_filter,islands_only_filter=get_filter(array_right,to_right_plus_islands_unique)
+    left_indices_without_islands,right_indices_without_islands=filter_by_islands(from_left,to_right_plus_islands_unique,without_islands_filter) #to be compared with switched sides
+    left_indices_to_islands_only,island_candidates_for_left=filter_by_islands(from_left,to_right_plus_islands_unique,islands_only_filter) #to be compared
+    island_candidates_for_left_adjusted=island_candidates_for_left-len(array_right)
+    island_candidates_for_left_coords=unpacked_islands[island_candidates_for_left_adjusted]
+    island_indices_to_left,left_indices_for_islands=get_indices_onesided(island_candidates_for_left_coords,array_left) #to be compared
     
     
+    """
     unique_r_indices_without_islands=unique_r_indices[unique_r_indices<len(array_right)] #to be compared
     closest_l_indices_without_islands=closest_l_indices[unique_r_indices<len(array_right)] #to be compared
 
     island_candidates_for_left=unique_r_indices[unique_r_indices>=len(array_right)] #to be compared
     closest_l_indices_only_islands=closest_l_indices[unique_r_indices>=len(array_right)] #to be compared
     
-    island_candidates_for_left_adjusted=island_candidates_for_left-len(array_right)
     
     
-    left_to_islands=np.stack((array_left[closest_l_indices_only_islands],unpacked_islands[island_candidates_for_left_adjusted]),axis=1)
+    
+    #left_to_islands=np.stack((array_left[closest_l_indices_only_islands],unpacked_islands[island_candidates_for_left_adjusted]),axis=1)
 
     
     neigh.fit(array_left) #population = left bank only
@@ -123,9 +153,9 @@ def get_all(array_left,array_right,seg_islands):
        
     
     unique_left_indices_to_islands_only,closest_island_indices_to_left=get_unique_shortest(distances_islands_to_left,left_indices_for_islands) #to be compared
-
-    islands_to_left=np.stack((array_left[unique_left_indices_to_islands_only],unpacked_islands[island_candidates_for_left_adjusted][closest_island_indices_to_left]),axis=1)
-    
+    """
+    #islands_to_left=np.stack((array_left[unique_left_indices_to_islands_only],unpacked_islands[island_candidates_for_left_adjusted][closest_island_indices_to_left]),axis=1)
+    left_bank_plus_islands=np.concatenate((array_left,unpacked_islands),axis=0)
     neigh.fit(left_bank_plus_islands) #population = left bank + all islands
     distances_rl,indices_l=neigh.kneighbors(array_right) #query = right bank
 
@@ -144,16 +174,16 @@ def get_all(array_left,array_right,seg_islands):
     
     unique_right_indices_to_islands_only,closest_island_indices_to_right=get_unique_shortest(distances_islands_to_right,right_indices_for_islands) #to be compared
 
- 
+    """
     all_lr=np.stack((closest_l_indices_without_islands,unique_r_indices_without_islands),axis=1)
     all_rl=np.stack((unique_l_indices_without_islands,closest_r_indices_without_islands),axis=1)
     
     duplicate_transects=get_duplicates(all_lr,all_rl)
     left_indices,right_indices=np.swapaxes(duplicate_transects,0,1)
-    transects=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)
+    transects=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)"""
     
-    all_left_to_islands=np.stack((closest_l_indices_only_islands,island_candidates_for_left_adjusted),axis=1)
-    all_islands_to_left=np.stack((unique_left_indices_to_islands_only,island_candidates_for_left_adjusted[closest_island_indices_to_left]),axis=1)
+    all_left_to_islands=np.stack((left_indices_to_islands_only,island_candidates_for_left_adjusted),axis=1)
+    all_islands_to_left=np.stack((left_indices_for_islands,island_candidates_for_left_adjusted[island_indices_to_left]),axis=1)
     
     duplicate_left_islands=get_duplicates(all_left_to_islands,all_islands_to_left)
     left_indices_is,island_indices_l=np.swapaxes(duplicate_left_islands,0,1)
@@ -227,9 +257,9 @@ def get_all(array_left,array_right,seg_islands):
         upper_index_right=right_split    
         if upper_index_left-lower_index_left >=10 and upper_index_right-lower_index_right >=10:
             get_all(array_left,array_right,lower_index_left,lower_index_right,upper_index_left,upper_index_right,pricky)"""
-    return left_to_islands,islands_to_left,transects_left_islands
+    return transects_left_islands
 
-left_islands_final,islands_to_left_final,trasects_left_islands_final=get_all(array_left,array_right,seg_islands)
+trasects_left_islands_final=get_all(array_left,array_right,seg_islands)
 
 
     
