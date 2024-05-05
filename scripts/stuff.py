@@ -38,6 +38,9 @@ seg_linestring_right=shapely.segmentize(linestring_right,5)
 array_left=np.array(seg_linestring_left.coords)
 print(len(array_left))
 
+schema_line = {
+    'geometry': 'LineString',
+}
 
 schema_point = {
     'geometry': 'Point',
@@ -114,25 +117,37 @@ def filter_by_islands(from_indices,to_indices,island_filter):
         
     return final_from_indices,final_to_indices
 
+def get_one_side(from_coords,to_coords,island_coords):
+    from_unique_unfiltered,to_unique_unflitered=get_indices_onesided(from_coords,to_coords,island_coords)
+         
+    without_islands_filter,islands_only_filter=get_filter(array_right,to_unique_unflitered)
+    from_indices_without_islands,to_indices_without_islands=filter_by_islands(from_unique_unfiltered,to_unique_unflitered,without_islands_filter) #to be compared with switched sides
+    from_indices_to_islands_only1,island_candidates=filter_by_islands(from_unique_unfiltered,to_unique_unflitered,islands_only_filter) #to be compared
+    island_candidates_adjusted1=island_candidates-len(to_coords)
+    island_candidates_coords=island_coords[island_candidates_adjusted1]
+    island_indices,from_indices_for_islands2=get_indices_onesided(island_candidates_coords,from_coords)
+    island_indices_final2=island_candidates_adjusted1[island_indices]
+    
+    return from_indices_without_islands,to_indices_without_islands,from_indices_to_islands_only1,island_candidates_adjusted1,from_indices_for_islands2,island_indices_final2
 
+def get_transects(a1,a2,b1,b2):
+    pass
+
+def export_line(arr,file):
+    with fiona.open(f"{file}", 'w', 'ESRI Shapefile', schema_line) as c:
+        for line in arr:
+            linestring=LineString(line)
+            c.write({
+                'geometry': mapping(linestring),
+            })
     
     
 
 def get_all(array_left,array_right,seg_islands):
-    
-    
-    
     unpacked_islands=np.concatenate((seg_islands),axis=0)
 
-    
-    from_left,to_right_plus_islands_unique=get_indices_onesided(array_left,array_right,unpacked_islands)
-         
-    without_islands_filter,islands_only_filter=get_filter(array_right,to_right_plus_islands_unique)
-    left_indices_without_islands,right_indices_without_islands=filter_by_islands(from_left,to_right_plus_islands_unique,without_islands_filter) #to be compared with switched sides
-    left_indices_to_islands_only,island_candidates_for_left=filter_by_islands(from_left,to_right_plus_islands_unique,islands_only_filter) #to be compared
-    island_candidates_for_left_adjusted=island_candidates_for_left-len(array_right)
-    island_candidates_for_left_coords=unpacked_islands[island_candidates_for_left_adjusted]
-    island_indices_to_left,left_indices_for_islands=get_indices_onesided(island_candidates_for_left_coords,array_left) #to be compared
+    left_lr,right_lr,left_li,islands_li,left_il,islands_il=get_one_side(array_left,array_right,unpacked_islands)
+    right_rl,left_rl,right_ri,islands_ri,right_ir,islands_ir=get_one_side(array_right,array_left,unpacked_islands)
     
     
     """
@@ -153,7 +168,7 @@ def get_all(array_left,array_right,seg_islands):
        
     
     unique_left_indices_to_islands_only,closest_island_indices_to_left=get_unique_shortest(distances_islands_to_left,left_indices_for_islands) #to be compared
-    """
+    
     #islands_to_left=np.stack((array_left[unique_left_indices_to_islands_only],unpacked_islands[island_candidates_for_left_adjusted][closest_island_indices_to_left]),axis=1)
     left_bank_plus_islands=np.concatenate((array_left,unpacked_islands),axis=0)
     neigh.fit(left_bank_plus_islands) #population = left bank + all islands
@@ -174,7 +189,7 @@ def get_all(array_left,array_right,seg_islands):
     
     unique_right_indices_to_islands_only,closest_island_indices_to_right=get_unique_shortest(distances_islands_to_right,right_indices_for_islands) #to be compared
 
-    """
+
     all_lr=np.stack((closest_l_indices_without_islands,unique_r_indices_without_islands),axis=1)
     all_rl=np.stack((unique_l_indices_without_islands,closest_r_indices_without_islands),axis=1)
     
@@ -182,12 +197,13 @@ def get_all(array_left,array_right,seg_islands):
     left_indices,right_indices=np.swapaxes(duplicate_transects,0,1)
     transects=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)"""
     
-    all_left_to_islands=np.stack((left_indices_to_islands_only,island_candidates_for_left_adjusted),axis=1)
-    all_islands_to_left=np.stack((left_indices_for_islands,island_candidates_for_left_adjusted[island_indices_to_left]),axis=1)
+    all_left_to_right=np.stack((left_lr,right_lr),axis=1)
+    all_right_to_left=np.stack((left_rl,right_rl),axis=1)
     
-    duplicate_left_islands=get_duplicates(all_left_to_islands,all_islands_to_left)
-    left_indices_is,island_indices_l=np.swapaxes(duplicate_left_islands,0,1)
-    transects_left_islands=np.stack((array_left[left_indices_is],unpacked_islands[island_indices_l]),axis=1)
+    duplicate_bank_transects=get_duplicates(all_left_to_right,all_right_to_left)
+    left_indices,right_indices=np.swapaxes(duplicate_bank_transects,0,1)
+    transects_banks=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)
+    
     
     """
     for left_index1,right_index1 in zip(closest_l_indices,unique_r_indices):
@@ -257,15 +273,13 @@ def get_all(array_left,array_right,seg_islands):
         upper_index_right=right_split    
         if upper_index_left-lower_index_left >=10 and upper_index_right-lower_index_right >=10:
             get_all(array_left,array_right,lower_index_left,lower_index_right,upper_index_left,upper_index_right,pricky)"""
-    return transects_left_islands
+    return transects_banks
 
 trasects_left_islands_final=get_all(array_left,array_right,seg_islands)
 
 
     
-schema_line = {
-    'geometry': 'LineString',
-}
+
 # Write a new Shapefile
 """
 with fiona.open('data/vysledek_lr.shp', 'w', 'ESRI Shapefile', schema_line) as c:
