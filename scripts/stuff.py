@@ -120,7 +120,7 @@ def filter_by_islands(from_indices,to_indices,island_filter):
 def get_one_side(from_coords,to_coords,island_coords):
     from_unique_unfiltered,to_unique_unflitered=get_indices_onesided(from_coords,to_coords,island_coords)
          
-    without_islands_filter,islands_only_filter=get_filter(array_right,to_unique_unflitered)
+    without_islands_filter,islands_only_filter=get_filter(to_coords,to_unique_unflitered)
     from_indices_without_islands,to_indices_without_islands=filter_by_islands(from_unique_unfiltered,to_unique_unflitered,without_islands_filter) #to be compared with switched sides
     from_indices_to_islands_only1,island_candidates=filter_by_islands(from_unique_unfiltered,to_unique_unflitered,islands_only_filter) #to be compared
     island_candidates_adjusted1=island_candidates-len(to_coords)
@@ -134,76 +134,51 @@ def get_transects(a1,a2,b1,b2):
     pass
 
 def export_line(arr,file):
-    with fiona.open(f"{file}", 'w', 'ESRI Shapefile', schema_line) as c:
+    with fiona.open(f"data/{file}.shp", 'w', 'ESRI Shapefile', schema_line) as c:
         for line in arr:
             linestring=LineString(line)
             c.write({
                 'geometry': mapping(linestring),
             })
-    
-    
+   
 
 def get_all(array_left,array_right,seg_islands):
+    transect_dict={}
     unpacked_islands=np.concatenate((seg_islands),axis=0)
 
     left_lr,right_lr,left_li,islands_li,left_il,islands_il=get_one_side(array_left,array_right,unpacked_islands)
     right_rl,left_rl,right_ri,islands_ri,right_ir,islands_ir=get_one_side(array_right,array_left,unpacked_islands)
     
-    
-    """
-    unique_r_indices_without_islands=unique_r_indices[unique_r_indices<len(array_right)] #to be compared
-    closest_l_indices_without_islands=closest_l_indices[unique_r_indices<len(array_right)] #to be compared
-
-    island_candidates_for_left=unique_r_indices[unique_r_indices>=len(array_right)] #to be compared
-    closest_l_indices_only_islands=closest_l_indices[unique_r_indices>=len(array_right)] #to be compared
+    transect_dict["transects_lr"]=np.stack((array_left[left_lr],array_right[right_lr]),axis=1)
+    transect_dict["transects_rl"]=np.stack((array_left[left_rl],array_right[right_rl]),axis=1)
     
     
+    transect_dict["transects_li"]=np.stack((array_left[left_li],unpacked_islands[islands_li]),axis=1)
+    transect_dict["transects_il"]=np.stack((array_left[left_il],unpacked_islands[islands_il]),axis=1)
     
-    
-    #left_to_islands=np.stack((array_left[closest_l_indices_only_islands],unpacked_islands[island_candidates_for_left_adjusted]),axis=1)
-
-    
-    neigh.fit(array_left) #population = left bank only
-    distances_islands_to_left,left_indices_for_islands=neigh.kneighbors(unpacked_islands[island_candidates_for_left_adjusted]) #query = only previously chosen island vertices
-       
-    
-    unique_left_indices_to_islands_only,closest_island_indices_to_left=get_unique_shortest(distances_islands_to_left,left_indices_for_islands) #to be compared
-    
-    #islands_to_left=np.stack((array_left[unique_left_indices_to_islands_only],unpacked_islands[island_candidates_for_left_adjusted][closest_island_indices_to_left]),axis=1)
-    left_bank_plus_islands=np.concatenate((array_left,unpacked_islands),axis=0)
-    neigh.fit(left_bank_plus_islands) #population = left bank + all islands
-    distances_rl,indices_l=neigh.kneighbors(array_right) #query = right bank
-
-    unique_l_indices,closest_r_indices=get_unique_shortest(distances_rl,indices_l) #unique_l_indices includes islands
-    
-    unique_l_indices_without_islands=unique_l_indices[unique_l_indices<len(array_left)] #to be compared
-    closest_r_indices_without_islands=closest_r_indices[unique_l_indices<len(array_left)] #to be compared
-    
-
-
-    island_candidates_for_right=unique_l_indices[unique_l_indices>=len(array_left)]
-    closest_r_indices_only_islands=closest_r_indices[unique_l_indices>=len(array_left)] #to be compared
-    
-    neigh.fit(array_right) #population = right bank only
-    distances_islands_to_right,right_indices_for_islands=neigh.kneighbors(left_bank_plus_islands[island_candidates_for_right]) #query = only previously chosen island vertices   
-    
-    unique_right_indices_to_islands_only,closest_island_indices_to_right=get_unique_shortest(distances_islands_to_right,right_indices_for_islands) #to be compared
-
-
-    all_lr=np.stack((closest_l_indices_without_islands,unique_r_indices_without_islands),axis=1)
-    all_rl=np.stack((unique_l_indices_without_islands,closest_r_indices_without_islands),axis=1)
-    
-    duplicate_transects=get_duplicates(all_lr,all_rl)
-    left_indices,right_indices=np.swapaxes(duplicate_transects,0,1)
-    transects=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)"""
+    transect_dict["transects_ri"]=np.stack((array_right[right_ri],unpacked_islands[islands_ri]),axis=1)
+    transect_dict["transects_ir"]=np.stack((array_right[right_ir],unpacked_islands[islands_ir]),axis=1)
     
     all_left_to_right=np.stack((left_lr,right_lr),axis=1)
     all_right_to_left=np.stack((left_rl,right_rl),axis=1)
     
     duplicate_bank_transects=get_duplicates(all_left_to_right,all_right_to_left)
     left_indices,right_indices=np.swapaxes(duplicate_bank_transects,0,1)
-    transects_banks=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)
+    transect_dict["transects_banks"]=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)
     
+    all_left_to_islands=np.stack((left_li,islands_li),axis=1)
+    all_islands_to_left=np.stack((left_il,islands_il),axis=1)
+    
+    duplicate_left_islands_transects=get_duplicates(all_left_to_islands,all_islands_to_left)
+    left_indices_islands,islands_indices_left=np.swapaxes(duplicate_left_islands_transects,0,1)
+    transect_dict["transects_left_islands"]=np.stack((array_left[left_indices_islands],unpacked_islands[islands_indices_left]),axis=1)
+    
+    all_right_to_islands=np.stack((right_ri,islands_ri),axis=1)
+    all_islands_to_right=np.stack((right_ir,islands_ir),axis=1)
+    
+    duplicate_right_islands_transects=get_duplicates(all_right_to_islands,all_islands_to_right)
+    right_indices_islands,islands_indices_right=np.swapaxes(duplicate_right_islands_transects,0,1)
+    transect_dict["transects_right_islands"]=np.stack((array_right[right_indices_islands],unpacked_islands[islands_indices_right]),axis=1)
     
     """
     for left_index1,right_index1 in zip(closest_l_indices,unique_r_indices):
@@ -273,57 +248,9 @@ def get_all(array_left,array_right,seg_islands):
         upper_index_right=right_split    
         if upper_index_left-lower_index_left >=10 and upper_index_right-lower_index_right >=10:
             get_all(array_left,array_right,lower_index_left,lower_index_right,upper_index_left,upper_index_right,pricky)"""
-    return transects_banks
+    return transect_dict
 
-trasects_left_islands_final=get_all(array_left,array_right,seg_islands)
+transects_final=get_all(array_left,array_right,seg_islands)
 
-
-    
-
-# Write a new Shapefile
-"""
-with fiona.open('data/vysledek_lr.shp', 'w', 'ESRI Shapefile', schema_line) as c:
-    ## If there are multiple geometries, put the "for" loop here
-
-    for pricka in pricky_final_lr:
-        pricka_linestring=LineString(pricka)
-        c.write({
-            'geometry': mapping(pricka_linestring),
-        })
-
-
-with fiona.open('data/vysledek_rl.shp', 'w', 'ESRI Shapefile', schema_line) as c:
-    ## If there are multiple geometries, put the "for" loop here
-
-    for pricka in pricky_final_rl:
-        pricka_linestring=LineString(pricka)
-        c.write({
-            'geometry': mapping(pricka_linestring),
-        })
-"""
-with fiona.open('data/vysledek_pokusicek3.shp', 'w', 'ESRI Shapefile', schema_line) as c:
-    ## If there are multiple geometries, put the "for" loop here
-
-    for pricka in left_islands_final:
-        pricka_linestring=LineString(pricka)
-        c.write({
-            'geometry': mapping(pricka_linestring),
-        })
-
-with fiona.open('data/vysledek_pokusicek4.shp', 'w', 'ESRI Shapefile', schema_line) as c:
-    ## If there are multiple geometries, put the "for" loop here
-
-    for pricka in islands_to_left_final:
-        pricka_linestring=LineString(pricka)
-        c.write({
-            'geometry': mapping(pricka_linestring),
-        })
-
-with fiona.open('data/vysledek_pokusicek5.shp', 'w', 'ESRI Shapefile', schema_line) as c:
-    ## If there are multiple geometries, put the "for" loop here
-
-    for pricka in trasects_left_islands_final:
-        pricka_linestring=LineString(pricka)
-        c.write({
-            'geometry': mapping(pricka_linestring),
-        })
+for key,value in transects_final.items():
+    export_line(value,key)
