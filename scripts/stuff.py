@@ -81,13 +81,20 @@ neigh = NearestNeighbors(n_neighbors=1)
 
 
 def get_unique_shortest(distances,pop_indices):
-    unique_pop_indices = np.unique(pop_indices)
+    unique_pop_indices_arr = np.unique(pop_indices)
     closest_query_indices=[]
-    for pop_index in unique_pop_indices:
+    unique_pop_indices=[]
+    for pop_index in unique_pop_indices_arr:
         indices_pop_indices = np.where(pop_indices == pop_index)[0]
-        closest_query_index = indices_pop_indices[np.argmin(distances[indices_pop_indices])]
+        min_id=np.argmin(distances[indices_pop_indices])
+        min_dist=distances[indices_pop_indices][min_id]
+        if min_dist > 60:  #hodne prozatimni reseni
+            continue
+        closest_query_index = indices_pop_indices[min_id]
         closest_query_indices.append(closest_query_index)
+        unique_pop_indices.append(pop_index)
     closest_query_indices=np.array(closest_query_indices)
+    unique_pop_indices=np.array(unique_pop_indices)
     return unique_pop_indices,closest_query_indices
 
 def get_duplicates(array1,array2):
@@ -133,6 +140,9 @@ def get_one_side(from_coords,to_coords,island_coords):
 def get_transects(a1,a2,b1,b2):
     pass
 
+def no_islands(from_coords,to_coords):
+    pass
+
 def export_line(arr,file):
     with fiona.open(f"data/{file}.shp", 'w', 'ESRI Shapefile', schema_line) as c:
         for line in arr:
@@ -145,42 +155,84 @@ def export_line(arr,file):
 def get_all(array_left,array_right,seg_islands):
     transect_dict={}
     unpacked_islands=np.concatenate((seg_islands),axis=0)
+    banks_merged=np.concatenate((array_left,array_right),axis=0)
+    
 
-    left_lr,right_lr,left_li,islands_li,left_il,islands_il=get_one_side(array_left,array_right,unpacked_islands)
-    right_rl,left_rl,right_ri,islands_ri,right_ir,islands_ir=get_one_side(array_right,array_left,unpacked_islands)
     
-    transect_dict["transects_lr"]=np.stack((array_left[left_lr],array_right[right_lr]),axis=1)
-    transect_dict["transects_rl"]=np.stack((array_left[left_rl],array_right[right_rl]),axis=1)
+    islands_il,left_il=get_indices_onesided(unpacked_islands,array_left)
+    islands_ir,right_ir=get_indices_onesided(unpacked_islands,array_right)
     
-    
-    transect_dict["transects_li"]=np.stack((array_left[left_li],unpacked_islands[islands_li]),axis=1)
+    #transect_dict["transects_li"]=np.stack((array_left[left_li],unpacked_islands[islands_li]),axis=1)
     transect_dict["transects_il"]=np.stack((array_left[left_il],unpacked_islands[islands_il]),axis=1)
     
-    transect_dict["transects_ri"]=np.stack((array_right[right_ri],unpacked_islands[islands_ri]),axis=1)
+    #transect_dict["transects_ri"]=np.stack((array_right[right_ri],unpacked_islands[islands_ri]),axis=1)
     transect_dict["transects_ir"]=np.stack((array_right[right_ir],unpacked_islands[islands_ir]),axis=1)
     
+    lower_int=0
+    upper_int=0
+    
+    left_isl_ints=[]
+    right_isl_ints=[]
+  
+    for isl in seg_islands:
+        upper_int+=len(isl)
+        
+        sel_isl_left=np.logical_and(islands_il>=lower_int,islands_il<upper_int)
+        sel_isl_right=np.logical_and(islands_ir>=lower_int,islands_ir<upper_int)
+        
+        left_min_id=np.argmin(left_il[sel_isl_left])
+        left_min=left_il[sel_isl_left][left_min_id]
+        left_max_id=np.argmax(left_il[sel_isl_left])
+        left_max=left_il[sel_isl_left][left_max_id]        
+        right_min_id=np.argmin(right_ir[sel_isl_right])
+        right_min=right_ir[sel_isl_right][right_min_id]
+        right_max_id=np.argmin(right_ir[sel_isl_right])
+        right_max=right_ir[sel_isl_right][right_max_id]
+        
+        left_isl_ints.append(np.arange(left_min,left_max))
+        right_isl_ints.append(np.arange(right_min,right_max))
+        
+        lower_int+=len(isl)
+        
+    used_for_islands_left=np.concatenate((left_isl_ints),axis=0)
+    used_for_islands_right=np.concatenate((right_isl_ints),axis=0)
+    
+    mask_left = np.ones_like(array_left, dtype=bool)
+    mask_left[used_for_islands_left] = False
+    array_left_without_islands = array_left[mask_left].reshape(-1,2)
+    
+    mask_right = np.ones_like(array_right, dtype=bool)
+    mask_right[used_for_islands_right] = False
+    array_right_without_islands = array_right[mask_right].reshape(-1,2)
+    
+    left_lr,right_lr=get_indices_onesided(array_left_without_islands,array_right_without_islands)
+    right_rl,left_rl=get_indices_onesided(array_right_without_islands,array_left_without_islands)
+    
+    transect_dict["transects_lr"]=np.stack((array_left_without_islands[left_lr],array_right_without_islands[right_lr]),axis=1)
+    transect_dict["transects_rl"]=np.stack((array_left_without_islands[left_rl],array_right_without_islands[right_rl]),axis=1)
+      
     all_left_to_right=np.stack((left_lr,right_lr),axis=1)
     all_right_to_left=np.stack((left_rl,right_rl),axis=1)
     
     duplicate_bank_transects=get_duplicates(all_left_to_right,all_right_to_left)
     left_indices,right_indices=np.swapaxes(duplicate_bank_transects,0,1)
-    transect_dict["transects_banks"]=np.stack((array_left[left_indices],array_right[right_indices]),axis=1)
-    
-    all_left_to_islands=np.stack((left_li,islands_li),axis=1)
-    all_islands_to_left=np.stack((left_il,islands_il),axis=1)
-    
+    transect_dict["transects_banks"]=np.stack((array_left_without_islands[left_indices],array_right_without_islands[right_indices]),axis=1)
+    """
+    #all_left_to_islands=np.stack((left_li,islands_li),axis=1)
+    #all_islands_to_left=np.stack((left_il,islands_il),axis=1)
+
     duplicate_left_islands_transects=get_duplicates(all_left_to_islands,all_islands_to_left)
     left_indices_islands,islands_indices_left=np.swapaxes(duplicate_left_islands_transects,0,1)
     transect_dict["transects_left_islands"]=np.stack((array_left[left_indices_islands],unpacked_islands[islands_indices_left]),axis=1)
-    
-    all_right_to_islands=np.stack((right_ri,islands_ri),axis=1)
-    all_islands_to_right=np.stack((right_ir,islands_ir),axis=1)
-    
+    """
+    #all_right_to_islands=np.stack((right_ri,islands_ri),axis=1)
+    #all_islands_to_right=np.stack((right_ir,islands_ir),axis=1)
+    """
     duplicate_right_islands_transects=get_duplicates(all_right_to_islands,all_islands_to_right)
     right_indices_islands,islands_indices_right=np.swapaxes(duplicate_right_islands_transects,0,1)
     transect_dict["transects_right_islands"]=np.stack((array_right[right_indices_islands],unpacked_islands[islands_indices_right]),axis=1)
     
-    """
+    
     for left_index1,right_index1 in zip(closest_l_indices,unique_r_indices):
         for right_index2,left_index2 in zip(closest_r_indices,unique_l_indices):
             if right_index1==right_index2 and left_index2==left_index1:
