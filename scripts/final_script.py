@@ -21,7 +21,7 @@ neigh = NearestNeighbors(n_neighbors=1)
 
 def convert_shp_to_linestrings(file):
     linestring_list=[]
-    with fiona.open(f"data/{file}.shp") as banks:
+    with fiona.open(f"data/{file}_clip.shp") as banks:
         for feature in banks:
             linestring_feature=shape(feature['geometry'])
             linestring_list.append(linestring_feature)
@@ -117,7 +117,7 @@ def get_island_intervals_on_banks(islands_list,bank):
         minimum=chosen_bank_indices_masked[min_id]
         max_id=np.argmax(chosen_bank_indices_masked)
         maximum=chosen_bank_indices_masked[max_id]
-        id_interval=np.arange(minimum,maximum)
+        id_interval=np.arange(minimum,maximum+1)
         id_list_intervals.append(id_interval)
         
     distances_mean_sorted, id_list_intervals_sorted, islands_indices_sorted,id_list_bank_sorted,islands_list_sorted = zip(*sorted(zip(distances_mean, id_list_intervals, islands_indices,id_list_bank,islands_list)))
@@ -126,45 +126,135 @@ def get_island_intervals_on_banks(islands_list,bank):
     used_island_intervals=None
     cumulative_islands_vertices_count=0
     counter=0
-    
+    transect_list=[]
     for bank_interval,island_indices,bank_ids in zip(id_list_intervals_sorted,islands_indices_sorted,id_list_bank_sorted):
         if counter==0:
             used_bank_intervals=bank_interval
-            island_rank=np.full_like(bank_interval,counter)
+            island_rank_interval=np.full_like(bank_interval,counter)
+            island_rank_ids=np.full_like(bank_ids,counter)
             used_island_ids=[island_indices]
             used_bank_ids=[bank_ids]
         else:
             doubles,double_banks,double_used=np.intersect1d(bank_interval,np.vstack((used_bank_intervals)),return_indices=True)
             if doubles.size != 0:
-                confronted_islands=np.unique(island_rank[double_used])
-                np.put(island_rank,double_banks,counter)
+                assigned_islands_to_intervals=island_rank_interval[double_used]
+                assigned_islands_to_ids=assigned_islands_to_intervals[np.isin(bank_interval[double_banks],bank_ids)]
+                
+                confronted_islands=np.unique(assigned_islands_to_intervals)
+                
+                for island_id in confronted_islands:
+                    from_islands,to_islands=get_indices_onesided(islands_list_sorted[counter][island_indices][np.isin(bank_ids,doubles[np.where(assigned_islands_to_intervals==island_id)])],islands_list_sorted[island_id],unique=True)
+                    transects=np.stack((islands_list_sorted[counter][island_indices][np.isin(bank_ids,doubles[np.where(assigned_islands_to_intervals==island_id)])][from_islands],islands_list_sorted[island_id][to_islands]),axis=1)
+                    transect_list.append(transects)
+                np.put(island_rank_interval,double_used,counter)
                 int_without_doubles=np.delete(bank_interval,double_banks,0)
                 used_bank_intervals=np.concatenate((used_bank_intervals,int_without_doubles))
                 island_rank_add=np.full_like(int_without_doubles,counter)
-                island_rank=np.concatenate((island_rank,island_rank_add))
-                for island_id in confronted_islands:
-                    from_islands,to_islands=get_indices_onesided(islands_list_sorted[counter][island_indices][np.isin(bank_ids,doubles)],islands_list_sorted[island_id],unique=True)
+                island_rank_interval=np.concatenate((island_rank_interval,island_rank_add))
             else:   
                 used_bank_intervals=np.concatenate((used_bank_intervals,bank_interval))
                 island_rank_add=np.full_like(bank_interval,counter)
-                island_rank=np.concatenate((island_rank,island_rank_add))                  
+                island_rank_interval=np.concatenate((island_rank_interval,island_rank_add))
+                island_rank_ids_add=np.full_like(bank_ids,counter)
+                island_rank_ids=np.concatenate((island_rank_ids,island_rank_ids_add))                  
         counter+=1        
                 
+    return transect_list                 
+            
+"""          
+def get_island_intervals_on_banks_modified(islands_list,bank):
+    id_list_intervals=[]
+    id_list_bank=[]
+    islands_indices=[]
+    chosen_distances=[]
+    island_tags=[]
+    counter=0
+    for island in islands_list:
+        distances,chosen_bank_indices=get_indices_onesided(island,bank,unique=False)
+        mask_ingredients=eliminate_incorrect(island,np.arange(len(island)),bank,chosen_bank_indices)
+        mask=mask_for_left_and_islands(*mask_ingredients)
+        chosen_bank_indices_masked=chosen_bank_indices[mask]
+        island_indices_masked=np.arange(len(chosen_bank_indices))[mask]
+        distances_masked=distances[mask]
+        island_tags.append(np.full_like(distances_masked,counter))
+        chosen_distances.append(distances_masked)
+        id_list_bank.append(chosen_bank_indices_masked)
+        islands_indices.append(island_indices_masked)
+        counter+=1
+    counter=0    
+    for bank_ids in id_list_bank:
+        intersect,current_bank_double_ids,rest_bank_double_ids=np.intersect1d(bank_ids,np.concatenate(id_list_bank[counter+1:]),return_indices=True)
+        if intersect.size != 0:
+           confronted_islands=np.concatenate(island_tags[counter+1:])[rest_bank_double_ids] 
+           confronted_islands_unique=np.unique(np.concatenate(confronted_islands))
+           for island_tag in confronted_islands_unique:
+                rest_distances_mean=np.mean(distances_masked[island_tag][np.isin(bank_ids,intersect[np.where(island_tags[counter+1:][rest_bank_double_ids]==island_tag)])])
+                current_distances_mean=np.mean(distances_masked[counter])
                 
-            
-          
-            
+"""                
+def islands_to_bank_intersection_check(island_list,bank_vertices,linestring_islands):
+    counter_big=0
+    
+    
+    final_linestrings=[]
+    for island_origin in island_list:
+        linestring_list=[]
+        ids_with_intersections=[]
+        ids_without_intersection=[]
+        transects_without_intersection=[]
+        island_indices,bank_indices=get_indices_onesided(island_origin,bank_vertices,unique=True)
+        mask_preparation=eliminate_incorrect(island_origin,island_indices,bank_vertices,bank_indices)
+        mask=mask_for_left_and_islands(*mask_preparation)
+        bank_indices_oriented=bank_indices[mask]
+        island_indices_oriented=island_indices[mask]
+        for to_id,from_id in zip(bank_indices_oriented,island_indices_oriented):
+            temporary_linestring=LineString((bank_vertices[to_id],island_origin[from_id]))
+            linestring_list.append(temporary_linestring)
+        counter_small=0
+        for island_to_be_checked_ls,island_to_be_checked_arr in zip(linestring_islands,island_list):
+            if counter_small==counter_big:
+                    counter_small+=1
+                    continue
+            if transects_without_intersection and ids_without_intersection:
+                linestring_list=transects_without_intersection
+                island_indices_oriented=ids_without_intersection
+                transects_without_intersection=[]
+                ids_without_intersection=[]
+                ids_with_intersections=[]
+                
+
+            for linestring,from_id in zip(linestring_list,island_indices_oriented):
+                intersection=shapely.intersection(linestring,island_to_be_checked_ls)
+                if intersection.is_empty==False:
+                    ids_with_intersections.append(from_id)
+                else:
+                    transects_without_intersection.append(linestring)
+                    ids_without_intersection.append(from_id)
+                        
+            if ids_with_intersections:
+                islands_from,islands_to=get_indices_onesided(island_origin[ids_with_intersections],island_to_be_checked_arr,unique=True)
+                for from_id,to_id in zip(islands_from,islands_to):
+                    temporary_linestring=LineString((island_to_be_checked_arr[to_id],island_origin[ids_with_intersections][from_id]))
+                    transects_without_intersection.append(temporary_linestring)
+                    ids_without_intersection.append(from_id)
+            counter_small+=1
+        final_linestrings.append(transects_without_intersection)            
+        counter_big+=1                 
+    return final_linestrings            
+        
+        
+                   
                 
         
 
 def islands_to_bank(islands_vertices, bank_vertices, name):
-    islands_indices,bank_indices=get_indices_onesided(islands_vertices,bank_vertices,unique=True)
+    distances,bank_indices=get_indices_onesided(islands_vertices,bank_vertices,unique=False)
 
-    mask_preparation=eliminate_incorrect(islands_vertices,islands_indices,bank_vertices,bank_indices)
+    mask_preparation=eliminate_incorrect(islands_vertices,np.arange(len(islands_vertices)),bank_vertices,bank_indices)
 
     mask=mask_for_left_and_islands(*mask_preparation)
 
-    transect_dict[f"{name}"]=np.stack((bank_vertices[bank_indices][mask],islands_vertices[islands_indices][mask]),axis=1)
+    transect_dict[f"{name}"]=np.stack((bank_vertices[bank_indices][mask],islands_vertices[mask]),axis=1)
     
     return bank_indices
     
@@ -183,8 +273,17 @@ for island in linestring_islands:
     arrays_islands.append(array_island)
     
 unpacked_islands=np.vstack(arrays_islands)
+linestringos=islands_to_bank_intersection_check(arrays_islands,array_right,linestring_islands)
+unpacked_linestringos=sum(linestringos,[])
 
-get_island_intervals_on_banks(arrays_islands,array_left)      
+
+with fiona.open(f"results/shapely_is_back.shp", 'w', 'ESRI Shapefile', schema_line) as c:
+    for line in unpacked_linestringos:
+
+        c.write({
+            'geometry': mapping(line),
+        })
+      
 #chosen_bank_indices_left=islands_to_bank(unpacked_islands,array_left,"transects_il")
 #chosen_bank_indices_right=islands_to_bank(unpacked_islands,array_right,"transects_ir")
 
@@ -194,8 +293,7 @@ right_plus_islands=np.vstack((array_right,unpacked_islands))
 
 #transect_dict["transects_lall"]=np.stack((array_left[chosen_bank_indices_left],right_plus_islands[all_lall]),axis=1)      
     
-islands_to_bank(unpacked_islands,array_right,"transects_ir")
-islands_to_bank(unpacked_islands,array_left,"transects_il")
+
 
 for key,value in transect_dict.items():
     export_line(value,key)
