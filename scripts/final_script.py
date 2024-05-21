@@ -188,59 +188,91 @@ def get_island_intervals_on_banks_modified(islands_list,bank):
            confronted_islands=np.concatenate(island_tags[counter+1:])[rest_bank_double_ids] 
            confronted_islands_unique=np.unique(np.concatenate(confronted_islands))
            for island_tag in confronted_islands_unique:
-                rest_distances_mean=np.mean(distances_masked[island_tag][np.isin(bank_ids,intersect[np.where(island_tags[counter+1:][rest_bank_double_ids]==island_tag)])])
-                current_distances_mean=np.mean(distances_masked[counter])
+                rest_distances_mean=np.mean(distances_masked[island_tag][np. isin(bank_ids,intersect[np.where(island_tags[counter+1:][rest_bank_double_ids]==island_tag)])])
+                current_distances_mean=np.mean(distances_masked[counter])"""
                 
-"""                
+               
 def islands_to_bank_intersection_check(island_list,bank_vertices,linestring_islands):
+    cumsum_to_adjust=[0]
+    lengths_cumsum=0
+    for line in island_list[0:-1]:
+        lengths_cumsum+=len(line)
+        cumsum_to_adjust.append(lengths_cumsum)
+    all_island_vertices_length=len(np.concatenate(island_list))
+    final_from_ids_adjusted=[]
+    final_to_ids_adjusted=[]
+    to_ids_without_intersection_adjusted=[]
     counter_big=0
-    
+    used_intervals=[]
     
     final_linestrings=[]
     for island_origin in island_list:
         linestring_list=[]
-        ids_with_intersections=[]
-        ids_without_intersection=[]
+        from_ids_with_intersections=[]
+        from_ids_without_intersection=[]
         transects_without_intersection=[]
-        island_indices,bank_indices=get_indices_onesided(island_origin,bank_vertices,unique=True)
+        to_indices_adjusted=[]
+        to_ids_without_intersection_adjusted=[]
+        distances,bank_indices=get_indices_onesided(island_origin,bank_vertices,unique=False)
+        used_interval=np.arange(np.amin(bank_indices),np.amax(bank_indices)+1)
+        used_intervals.append(used_interval)
+        island_indices=np.arange(len(island_origin))
         mask_preparation=eliminate_incorrect(island_origin,island_indices,bank_vertices,bank_indices)
         mask=mask_for_left_and_islands(*mask_preparation)
-        bank_indices_oriented=bank_indices[mask]
+        to_indices_oriented=bank_indices[mask]
         island_indices_oriented=island_indices[mask]
-        for to_id,from_id in zip(bank_indices_oriented,island_indices_oriented):
+        
+        to_indices_adjusted=to_indices_oriented+all_island_vertices_length
+        island_indices_adjusted=island_indices_oriented+cumsum_to_adjust[counter_big]
+        
+        
+        
+        for to_id,from_id in zip(to_indices_oriented,island_indices_oriented):
             temporary_linestring=LineString((bank_vertices[to_id],island_origin[from_id]))
             linestring_list.append(temporary_linestring)
         counter_small=0
         for island_to_be_checked_ls,island_to_be_checked_arr in zip(linestring_islands,island_list):
             if counter_small==counter_big:
-                    counter_small+=1
-                    continue
-            if transects_without_intersection and ids_without_intersection:
+                counter_small+=1
+                continue
+            if transects_without_intersection and from_ids_without_intersection:
                 linestring_list=transects_without_intersection
-                island_indices_oriented=ids_without_intersection
+                island_indices_oriented=from_ids_without_intersection
+                to_indices_adjusted=to_ids_without_intersection_adjusted
                 transects_without_intersection=[]
-                ids_without_intersection=[]
-                ids_with_intersections=[]
+                from_ids_without_intersection=[]
+                from_ids_with_intersections=[]
+                to_ids_without_intersection_adjusted=[]
                 
 
-            for linestring,from_id in zip(linestring_list,island_indices_oriented):
+            for linestring,from_id,to_id in zip(linestring_list,island_indices_oriented,to_indices_adjusted):
                 intersection=shapely.intersection(linestring,island_to_be_checked_ls)
                 if intersection.is_empty==False:
-                    ids_with_intersections.append(from_id)
+                    from_ids_with_intersections.append(from_id)
                 else:
                     transects_without_intersection.append(linestring)
-                    ids_without_intersection.append(from_id)
+                    from_ids_without_intersection.append(from_id)
+                    
+                    to_ids_without_intersection_adjusted.append(to_id)
+                    
+                    
                         
-            if ids_with_intersections:
-                islands_from,islands_to=get_indices_onesided(island_origin[ids_with_intersections],island_to_be_checked_arr,unique=True)
+            if from_ids_with_intersections:
+                distances2,islands_to=get_indices_onesided(island_origin[from_ids_with_intersections],island_to_be_checked_arr,unique=False)
+                islands_from=np.array(from_ids_with_intersections)
                 for from_id,to_id in zip(islands_from,islands_to):
-                    temporary_linestring=LineString((island_to_be_checked_arr[to_id],island_origin[ids_with_intersections][from_id]))
+                    temporary_linestring=LineString((island_to_be_checked_arr[to_id],island_origin[from_id]))
                     transects_without_intersection.append(temporary_linestring)
-                    ids_without_intersection.append(from_id)
+                    from_ids_without_intersection.append(from_id)
+                    to_ids_without_intersection_adjusted.append(to_id+cumsum_to_adjust[counter_small])
             counter_small+=1
+        from_ids_adjusted=np.array(from_ids_without_intersection)+cumsum_to_adjust[counter_big]
+        final_from_ids_adjusted.append(from_ids_adjusted)
+        final_to_ids_adjusted.append(np.array(to_ids_without_intersection_adjusted))
         final_linestrings.append(transects_without_intersection)            
-        counter_big+=1                 
-    return final_linestrings            
+        counter_big+=1
+    final_intervals=np.unique(np.concatenate(used_intervals))                 
+    return final_linestrings,final_intervals,final_from_ids_adjusted,final_to_ids_adjusted            
         
         
                    
@@ -263,31 +295,64 @@ linestring_left=convert_shp_to_linestrings("left")
 linestring_right=convert_shp_to_linestrings("right")
 linestring_islands=convert_shp_to_linestrings("islands")
 
-array_left=segmentize_array(linestring_left[0],10)
-array_right=segmentize_array(linestring_right[0],10)
+array_left=segmentize_array(linestring_left[0],20)
+array_right=segmentize_array(linestring_right[0],20)
 
 arrays_islands=[]
 
 for island in linestring_islands:
-    array_island=segmentize_array(island,10)
+    array_island=segmentize_array(island,20)
     arrays_islands.append(array_island)
-    
 unpacked_islands=np.vstack(arrays_islands)
-linestringos=islands_to_bank_intersection_check(arrays_islands,array_right,linestring_islands)
-unpacked_linestringos=sum(linestringos,[])
+
+def final_islands(arrays_islands,array_bank,linestring_islands,name):    
+    
+    linestringos,intervalos,from_ids,to_ids=islands_to_bank_intersection_check(arrays_islands,array_bank,linestring_islands)
+    unpacked_linestringos=sum(linestringos,[])
+    unpacked_from_ids=np.concatenate(from_ids)
+    unpacked_to_ids=np.concatenate(to_ids)
+    transect_list=[]
+    for transect in unpacked_linestringos:
+        linestringos_array=segmentize_array(transect,inf)
+        transect_list.append(linestringos_array)
+    to_vertices,from_vertices=np.array(transect_list).swapaxes(0,1)
+
+    widths=np.linalg.norm(to_vertices-from_vertices, axis=1)
 
 
-with fiona.open(f"results/shapely_is_back.shp", 'w', 'ESRI Shapefile', schema_line) as c:
-    for line in unpacked_linestringos:
+    idk,indices_to_use=get_unique_shortest(widths,to_vertices)
 
-        c.write({
-            'geometry': mapping(line),
-        })
+    final_array=np.stack((to_vertices[indices_to_use],from_vertices[indices_to_use]),axis=1)
+    
+    
+    export_line(final_array,f"{name}")
+    return intervalos,unpacked_from_ids[indices_to_use],unpacked_to_ids[indices_to_use]
+    
+intervals_right,from_ids_right,to_ids_right=final_islands(arrays_islands,array_right,linestring_islands,"islands_to_right")
+intervals_left,from_ids_left,to_ids_left=final_islands(arrays_islands,array_left,linestring_islands,"islands_to_left")
+
+array_left_without_used=np.delete(array_left,intervals_left,axis=0)
+array_right_without_used=np.delete(array_right,intervals_right,axis=0)
+
+left_lr,right_lr=get_indices_onesided(array_left_without_used,array_right_without_used,unique=True)
+right_rl,left_rl=get_indices_onesided(array_right_without_used,array_left_without_used,unique=True)
+
+transect_dict["all_lr"]=np.stack((array_left_without_used[left_lr],array_right_without_used[right_lr]),axis=1)
+transect_dict["all_rl"]=np.stack((array_left_without_used[left_rl],array_right_without_used[right_rl]),axis=1)
+
+
+islands_plus_right=np.vstack((unpacked_islands,array_right))
+
+transect_dict["adjusted_right"]=np.stack((islands_plus_right[to_ids_right],islands_plus_right[from_ids_right]),axis=1)
+
       
 #chosen_bank_indices_left=islands_to_bank(unpacked_islands,array_left,"transects_il")
 #chosen_bank_indices_right=islands_to_bank(unpacked_islands,array_right,"transects_ir")
 
-right_plus_islands=np.vstack((array_right,unpacked_islands))
+
+    
+    
+    
 
 #all_lall=get_indices_onesided(array_left[chosen_bank_indices_left],right_plus_islands,unique=False)
 
