@@ -6,6 +6,7 @@ import numpy as np
 from shapely.geometry import shape, mapping, LineString, Point
 from matplotlib import pyplot as plt
 from sklearn.neighbors import NearestNeighbors
+import pandas as pd
 
 schema_line = {
     'geometry': 'LineString',
@@ -344,6 +345,26 @@ transect_dict["all_rl"]=np.stack((array_left_without_used[left_rl],array_right_w
 islands_plus_right=np.vstack((unpacked_islands,array_right))
 
 transect_dict["adjusted_right"]=np.stack((islands_plus_right[to_ids_right],islands_plus_right[from_ids_right]),axis=1)
+
+cumsum_to_adjust=[0]
+lengths_cumsum=0
+for line in arrays_islands:
+        lengths_cumsum+=len(line)
+        cumsum_to_adjust.append(lengths_cumsum)
+
+panda_data=pd.DataFrame({'from_ids': from_ids_right, 'to_ids': to_ids_right, "width":np.linalg.norm(islands_plus_right[to_ids_right]-islands_plus_right[from_ids_right],axis=1)})
+
+
+cumsum_to_adjust.append(panda_data['to_ids'].max() + 1)
+
+# Use pd.cut to bin the data into specified intervals
+panda_data['interval'] = pd.cut(panda_data['to_ids'], bins=cumsum_to_adjust, right=False)
+
+# Group by the intervals
+grouped = panda_data.groupby('interval')
+
+for key, item in grouped:
+    print(grouped.get_group(key), "\n\n")
 
       
 #chosen_bank_indices_left=islands_to_bank(unpacked_islands,array_left,"transects_il")

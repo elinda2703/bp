@@ -16,6 +16,10 @@ schema_point = {
     'geometry': 'Point',
 }
 
+schema_multipolygon = {
+    'geometry': 'MultiPolygon',
+}
+
 transect_dict={}
 
 neigh = NearestNeighbors(n_neighbors=1)
@@ -108,8 +112,16 @@ def find_optimal_unique_closest_vertices(left_bank, right_bank):
     row_ind, col_ind = linear_sum_assignment(distances)
 
     # Return the indices of the closest vertices on the right bank and their corresponding distances
-    closest_distances = distances[row_ind, col_ind]
     return col_ind, row_ind
+
+def get_gaps(left,right):
+    if len(right) != len(left):
+        print("hmmmm")
+    
+    left_gaps=np.linalg.norm((left[1:]-left[:-1]),axis=1)
+    right_gaps=np.linalg.norm((right[1:]-right[:-1]),axis=1)
+    all_gaps=np.concatenate((left_gaps,right_gaps))
+    return all_gaps
 
     
 
@@ -119,6 +131,17 @@ linestring_islands=convert_shp_to_linestrings("islands")
 
 array_left=segmentize_array(linestring_left[0],20)
 array_right=segmentize_array(linestring_right[0],20)
+
+island_polygons=shapely.polygonize(linestring_islands)
+
+multipolygon_islands=shapely.multipolygons(shapely.get_parts(island_polygons))
+
+with fiona.open(f"results/islands_polygons.shp", 'w', 'ESRI Shapefile', schema_multipolygon) as c:
+    c.write({
+        'geometry': mapping(multipolygon_islands),
+    })
+
+
 
 left_lr,right_lr=bank_to_bank(array_left,array_right)
 right_rl,left_rl=bank_to_bank(array_right,array_left)
@@ -148,11 +171,13 @@ rl_ids=np.stack((left_rl[mask_rl],right_rl[mask_rl]),axis=1)
 duplicates=get_duplicates(lr_ids,rl_ids)
 left_duplicate_ids,right_duplicate_ids=np.swapaxes(duplicates,0,1)
 
+
+
 start_left=left_duplicate_ids[0]
 start_right=right_duplicate_ids[0]
 
-left_indices=[]
-right_indices=[]
+left_indices=[np.array([start_left])]
+right_indices=[np.array([start_right])]
 
 
 for left_id,right_id in zip(left_duplicate_ids[1:],right_duplicate_ids[1:]):
@@ -162,30 +187,88 @@ for left_id,right_id in zip(left_duplicate_ids[1:],right_duplicate_ids[1:]):
     left_filtered=all_left_sorted[np.logical_and(all_left_sorted>start_left,all_left_sorted<end_left)]
     right_filtered=all_right_sorted[np.logical_and(all_right_sorted>start_right,all_right_sorted<end_right)]
     
-    if len(left_filtered) > 2 or len(right_filtered) > 2:
+    if len(left_filtered) > 0 or len(right_filtered) > 0:
         ids_right,ids_left=find_optimal_unique_closest_vertices(array_left[left_filtered],array_right[right_filtered])
         
-        left_indices.append(left_filtered[ids_left])
-        right_indices.append(right_filtered[ids_right])
+        left_bpm_with_ends=np.array([start_left,*left_filtered[ids_left],end_left])
+        right_bpm_with_ends=np.array([start_right,*right_filtered[ids_right],end_right])
+        
+        left_lr_filtered=left_lr_masked[np.logical_and(left_lr_masked>=start_left,left_lr_masked<=end_left)]
+        right_lr_filtered=right_lr_masked[np.logical_and(right_lr_masked>=start_right,right_lr_masked<=end_right)]
+        
+        left_rl_filtered=left_rl_masked[np.logical_and(left_rl_masked>=start_left,left_rl_masked<=end_left)]
+        right_rl_filtered=right_rl_masked[np.logical_and(right_rl_masked>=start_right,right_rl_masked<=end_right)]
+        
+        if len(left_lr_filtered) == len(right_lr_filtered) and len(left_rl_filtered) == len(right_rl_filtered):
+        
+            gaps_bpm=get_gaps(array_left[left_bpm_with_ends],array_right[right_bpm_with_ends])
+            gaps_lr=get_gaps(array_left[left_lr_filtered],array_right[right_lr_filtered])
+            gaps_rl=get_gaps(array_left[left_rl_filtered],array_right[right_rl_filtered])
+            
+            max_gap_bpm=np.max(gaps_bpm)
+            max_gap_lr=np.max(gaps_lr)
+            max_gap_rl=np.max(gaps_rl)
+            
+            
+            smallest_gap=min(max_gap_bpm,max_gap_lr,max_gap_rl)
+            
+            if smallest_gap == max_gap_bpm:
+                left_indices.append(left_filtered[ids_left])
+                right_indices.append(right_filtered[ids_right])
+            elif smallest_gap == max_gap_lr:
+                left_indices.append(left_lr_filtered[1:-1])
+                right_indices.append(right_lr_filtered[1:-1])
+            else:
+                left_indices.append(left_rl_filtered[1:-1])
+                right_indices.append(right_rl_filtered[1:-1])  
+        
+        
+        
+    left_indices.append(np.array([end_left]))
+    right_indices.append(np.array([end_right]))    
     
     start_left=left_id
     start_right=right_id
     
-between_duplicates_left=np.concatenate(left_indices)
-between_duplicates_right=np.concatenate(right_indices)
+final_left=np.concatenate(left_indices)
+final_right=np.concatenate(right_indices)
+
+final_banks=np.stack((array_left[final_left],array_right[final_right]),axis=0)
+final_transects=banks=final_banks.swapaxes(0,1)
 
 
-transect_dict["bipartite"]=np.stack((array_left[between_duplicates_left],array_right[between_duplicates_right]),axis=1)
+skoro_kilometraz=np.linalg.norm(np.diff(final_banks, axis=1), axis=-1)
 
-"""
+distances_between_transects=np.mean(skoro_kilometraz,axis=0)/1000
+
+cum_km=np.cumsum(distances_between_transects)
+
+cum_km0=np.insert(cum_km,0,0)
 
 
+effective_widths=[]
+for transect in final_transects:
+    transect_linestring=LineString((transect))
+    effective_transect=shapely.difference(transect_linestring,multipolygon_islands)
+    effective_widths.append(effective_transect.length)
 
 
-transect_dict["left_to_right"]=np.stack((array_left[left_lr][mask_lr],array_right[right_lr][mask_lr]),axis=1)
+plt.title("River width") 
+plt.xlabel("kilometrage (km)") 
+plt.ylabel("river width (m)") 
+plt.plot(cum_km0,effective_widths)
+plt.grid() 
+plt.show()
 
-transect_dict["right_to_left"]=np.stack((array_left[left_rl][mask_rl],array_right[right_rl][mask_rl]),axis=1)
-"""
+
+transect_dict["combination"]=np.stack((array_left[final_left],array_right[final_right]),axis=1)
+
+transect_dict["left_to_right"]=np.stack((array_left[left_lr_masked],array_right[right_lr_masked]),axis=1)
+
+transect_dict["right_to_left"]=np.stack((array_left[left_rl_masked],array_right[right_rl_masked]),axis=1)
+
+transect_dict["duplos"]=np.stack((array_left[left_duplicate_ids],array_right[right_duplicate_ids]),axis=1)
+
 
 
 
