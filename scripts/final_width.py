@@ -1,5 +1,5 @@
 import fiona
-import time
+import os
 import shapely
 from math import sqrt,inf
 import numpy as np
@@ -10,6 +10,8 @@ import pandas as pd
 from scipy.optimize import linear_sum_assignment
 schema_line = {
     'geometry': 'LineString',
+    'properties': {'width': 'float','kilometrag':'float'},
+    
 }
 
 schema_point = {
@@ -115,32 +117,34 @@ def find_optimal_unique_closest_vertices(left_bank, right_bank):
     return col_ind, row_ind
 
 def get_gaps(left,right):
-    if len(right) != len(left):
-        print("hmmmm")
     
     left_gaps=np.linalg.norm((left[1:]-left[:-1]),axis=1)
     right_gaps=np.linalg.norm((right[1:]-right[:-1]),axis=1)
     all_gaps=np.concatenate((left_gaps,right_gaps))
     return all_gaps
 
-    
+path_island = 'data/islands.shp'
+isFile = os.path.isfile(path_island)    
 
 linestring_left=convert_shp_to_linestrings("left")
 linestring_right=convert_shp_to_linestrings("right")
-linestring_islands=convert_shp_to_linestrings("islands")
+if isFile==True:
+    linestring_islands=convert_shp_to_linestrings("islands")
+    island_polygons=shapely.polygonize(linestring_islands)
+    multipolygon_islands=shapely.multipolygons(shapely.get_parts(island_polygons))
+else:
+    multipolygon_islands=None
 
-array_left=segmentize_array(linestring_left[0],20)
-array_right=segmentize_array(linestring_right[0],20)
+array_left=segmentize_array(linestring_left[0],5)
+array_right=segmentize_array(linestring_right[0],5)
 
-island_polygons=shapely.polygonize(linestring_islands)
 
-multipolygon_islands=shapely.multipolygons(shapely.get_parts(island_polygons))
-
+"""
 with fiona.open(f"results/islands_polygons.shp", 'w', 'ESRI Shapefile', schema_multipolygon) as c:
     c.write({
         'geometry': mapping(multipolygon_islands),
     })
-
+"""
 
 
 left_lr,right_lr=bank_to_bank(array_left,array_right)
@@ -193,17 +197,32 @@ for left_id,right_id in zip(left_duplicate_ids[1:],right_duplicate_ids[1:]):
         left_bpm_with_ends=np.array([start_left,*left_filtered[ids_left],end_left])
         right_bpm_with_ends=np.array([start_right,*right_filtered[ids_right],end_right])
         
-        left_lr_filtered=left_lr_masked[np.logical_and(left_lr_masked>=start_left,left_lr_masked<=end_left)]
-        right_lr_filtered=right_lr_masked[np.logical_and(right_lr_masked>=start_right,right_lr_masked<=end_right)]
+        filter_lr = np.where((right_lr_masked>=start_right) & (right_lr_masked<=end_right))[0]
         
-        left_rl_filtered=left_rl_masked[np.logical_and(left_rl_masked>=start_left,left_rl_masked<=end_left)]
-        right_rl_filtered=right_rl_masked[np.logical_and(right_rl_masked>=start_right,right_rl_masked<=end_right)]
+        left_lr_filtered=left_lr_masked[filter_lr]
+        right_lr_filtered=right_lr_masked[filter_lr]
         
-        if len(left_lr_filtered) == len(right_lr_filtered) and len(left_rl_filtered) == len(right_rl_filtered):
+        filter_check_lr=(left_lr_filtered>=start_left) & (left_lr_filtered<=end_left)
+        
+        left_lr_final=left_lr_filtered[filter_check_lr]
+        right_lr_final=right_lr_filtered[filter_check_lr]
+        
+        filter_rl = np.where((left_rl_masked>=start_left) & (left_rl_masked<=end_left))[0]
+        
+        left_rl_filtered=left_rl_masked[filter_rl]
+        right_rl_filtered=right_rl_masked[filter_rl]
+        
+        filter_check_rl=(right_rl_filtered>=start_right) & (right_rl_filtered<=end_right)
+        
+        left_rl_final=left_rl_filtered[filter_check_rl]
+        right_rl_final=right_rl_filtered[filter_check_rl]
+        
+        
+        if len(left_lr_final) == len(right_lr_final) and len(left_rl_final) == len(right_rl_final):
         
             gaps_bpm=get_gaps(array_left[left_bpm_with_ends],array_right[right_bpm_with_ends])
-            gaps_lr=get_gaps(array_left[left_lr_filtered],array_right[right_lr_filtered])
-            gaps_rl=get_gaps(array_left[left_rl_filtered],array_right[right_rl_filtered])
+            gaps_lr=get_gaps(array_left[left_lr_final],array_right[right_lr_final])
+            gaps_rl=get_gaps(array_left[left_rl_final],array_right[right_rl_final])
             
             max_gap_bpm=np.max(gaps_bpm)
             max_gap_lr=np.max(gaps_lr)
@@ -247,11 +266,26 @@ cum_km0=np.insert(cum_km,0,0)
 
 
 effective_widths=[]
-for transect in final_transects:
-    transect_linestring=LineString((transect))
-    effective_transect=shapely.difference(transect_linestring,multipolygon_islands)
-    effective_widths.append(effective_transect.length)
+effective_transects=[]
 
+if multipolygon_islands !=None:
+    for transect in final_transects:
+        transect_linestring=LineString((transect))
+        effective_transect=shapely.difference(transect_linestring,multipolygon_islands)
+        effective_transects.append(effective_transect)
+        effective_widths.append(effective_transect.length)
+else:
+    for transect in final_transects:
+        effective_transect=LineString((transect))
+        effective_transects.append(effective_transect)
+        effective_widths.append(effective_transect.length)
+
+with fiona.open("results/final_transects.shp", 'w', 'ESRI Shapefile', schema_line) as c:
+    for line,km in zip(effective_transects,cum_km0):
+        c.write({
+            'geometry': mapping(line),
+            'properties': {'width': line.length,'kilometrag':km}
+        })
 
 plt.title("River width") 
 plt.xlabel("kilometrage (km)") 
@@ -260,17 +294,17 @@ plt.plot(cum_km0,effective_widths)
 plt.grid() 
 plt.show()
 
-
+"""
 transect_dict["combination"]=np.stack((array_left[final_left],array_right[final_right]),axis=1)
+
+
+
+transect_dict["duplos"]=np.stack((array_left[left_duplicate_ids],array_right[right_duplicate_ids]),axis=1)
 
 transect_dict["left_to_right"]=np.stack((array_left[left_lr_masked],array_right[right_lr_masked]),axis=1)
 
 transect_dict["right_to_left"]=np.stack((array_left[left_rl_masked],array_right[right_rl_masked]),axis=1)
-
-transect_dict["duplos"]=np.stack((array_left[left_duplicate_ids],array_right[right_duplicate_ids]),axis=1)
-
-
-
+"""
 
 for key,value in transect_dict.items():
     export_line(value,key)
