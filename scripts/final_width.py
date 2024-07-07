@@ -4,6 +4,7 @@ import shapely
 from math import sqrt,inf
 import numpy as np
 from shapely.geometry import shape, mapping, LineString, Point
+from shapely.ops import substring
 from matplotlib import pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 import pandas as pd
@@ -116,6 +117,7 @@ def find_optimal_unique_closest_vertices(left_bank, right_bank):
     # Return the indices of the closest vertices on the right bank and their corresponding distances
     return col_ind, row_ind
 
+
 def get_gaps(left,right):
     
     left_gaps=np.linalg.norm((left[1:]-left[:-1]),axis=1)
@@ -128,6 +130,7 @@ isFile = os.path.isfile(path_island)
 
 linestring_left=convert_shp_to_linestrings("left")
 linestring_right=convert_shp_to_linestrings("right")
+linestring_center=convert_shp_to_linestrings("line")
 if isFile==True:
     linestring_islands=convert_shp_to_linestrings("islands")
     island_polygons=shapely.polygonize(linestring_islands)
@@ -137,6 +140,28 @@ else:
 
 array_left=segmentize_array(linestring_left[0],5)
 array_right=segmentize_array(linestring_right[0],5)
+
+def rolling_average(arr, window_size):
+    # Create the window (kernel) for averaging
+    window = np.ones(window_size) / window_size
+    
+    # Compute the convolution
+    return np.convolve(arr, window, mode='valid')
+
+def get_average_widths_for_segments(polyline, segment_length, widths, kilometrages):
+    i=0
+    segments=[]
+    average_widths=[]
+    while True:
+        segment=substring(polyline,i,i+segment_length)
+        if segment.length>0:
+            selected_kilometrages=np.where((kilometrages>i) & (kilometrages<(i+segment_length)))
+            average_width=np.mean(widths[selected_kilometrages])
+            average_widths.append(average_width)
+            segments.append(segment)
+            i+=segment_length
+        else:
+            return segments,average_widths
 
 
 """
@@ -175,23 +200,24 @@ rl_ids=np.stack((left_rl[mask_rl],right_rl[mask_rl]),axis=1)
 duplicates=get_duplicates(lr_ids,rl_ids)
 left_duplicate_ids,right_duplicate_ids=np.swapaxes(duplicates,0,1)
 
+left_duplicate_ids_plus_end=np.concatenate((left_duplicate_ids,[all_left_sorted[-1]]),axis=0)
+right_duplicate_ids_plus_end=np.concatenate((right_duplicate_ids,[all_right_sorted[-1]]),axis=0)
+
+start_left=0
+start_right=0
+
+left_indices=[]
+right_indices=[]
 
 
-start_left=left_duplicate_ids[0]
-start_right=right_duplicate_ids[0]
-
-left_indices=[np.array([start_left])]
-right_indices=[np.array([start_right])]
-
-
-for left_id,right_id in zip(left_duplicate_ids[1:],right_duplicate_ids[1:]):
+for left_id,right_id in zip(left_duplicate_ids_plus_end,right_duplicate_ids_plus_end):
     end_left=left_id
     end_right=right_id
     
     left_filtered=all_left_sorted[np.logical_and(all_left_sorted>start_left,all_left_sorted<end_left)]
     right_filtered=all_right_sorted[np.logical_and(all_right_sorted>start_right,all_right_sorted<end_right)]
     
-    if len(left_filtered) > 0 or len(right_filtered) > 0:
+    if len(left_filtered) > 0 and len(right_filtered) > 0:
         ids_right,ids_left=find_optimal_unique_closest_vertices(array_left[left_filtered],array_right[right_filtered])
         
         left_bpm_with_ends=np.array([start_left,*left_filtered[ids_left],end_left])
@@ -219,32 +245,58 @@ for left_id,right_id in zip(left_duplicate_ids[1:],right_duplicate_ids[1:]):
         
         
         if len(left_lr_final) == len(right_lr_final) and len(left_rl_final) == len(right_rl_final):
-        
-            gaps_bpm=get_gaps(array_left[left_bpm_with_ends],array_right[right_bpm_with_ends])
-            gaps_lr=get_gaps(array_left[left_lr_final],array_right[right_lr_final])
-            gaps_rl=get_gaps(array_left[left_rl_final],array_right[right_rl_final])
             
-            max_gap_bpm=np.max(gaps_bpm)
-            max_gap_lr=np.max(gaps_lr)
-            max_gap_rl=np.max(gaps_rl)
+            gaps_lr=np.flip(np.sort(get_gaps(array_left[left_lr_final],array_right[right_lr_final])))
+            gaps_rl=np.flip(np.sort(get_gaps(array_left[left_rl_final],array_right[right_rl_final])))
+            gaps_bpm=np.flip(np.sort(get_gaps(array_left[left_bpm_with_ends],array_right[right_bpm_with_ends])))
             
-            
-            smallest_gap=min(max_gap_bpm,max_gap_lr,max_gap_rl)
-            
-            if smallest_gap == max_gap_bpm:
-                left_indices.append(left_filtered[ids_left])
-                right_indices.append(right_filtered[ids_right])
-            elif smallest_gap == max_gap_lr:
-                left_indices.append(left_lr_filtered[1:-1])
-                right_indices.append(right_lr_filtered[1:-1])
+            if np.array_equal(gaps_lr,gaps_bpm) or np.array_equal(gaps_rl,gaps_bpm):
+                if np.array_equal(gaps_lr,gaps_rl):
+                    left_indices.append(left_filtered[ids_left])
+                    right_indices.append(right_filtered[ids_right])
+
+                else:    
+                    for gap_lr,gap_rl in zip(gaps_lr,gaps_rl):
+                        if gap_rl == gap_lr:
+                            continue
+                        elif gap_rl < gap_lr:
+                                left_indices.append(left_rl_filtered[1:-1])
+                                right_indices.append(right_rl_filtered[1:-1])
+                                break
+                        else:
+                                left_indices.append(left_lr_filtered[1:-1])
+                                right_indices.append(right_lr_filtered[1:-1])
+                                break
+                        
             else:
-                left_indices.append(left_rl_filtered[1:-1])
-                right_indices.append(right_rl_filtered[1:-1])  
+                filt=np.array([0,1,2])
+                for gap_lr,gap_rl,gap_bpm in zip(gaps_lr,gaps_rl,gaps_bpm):
+                    arr=np.array([gap_lr,gap_rl,gap_bpm])
+                    min_gap_length=np.min(arr[filt])
+                    min_gap_where=np.where(arr == min_gap_length)
+                    filt_where=np.intersect1d(min_gap_where,filt)
+                    if len(filt_where)==3:
+                        continue
+                    elif len(filt_where)==2:
+                        filt=filt_where
+                        continue
+                    else:
+                        if filt_where[0]==0:
+                            left_indices.append(left_lr_filtered[1:-1])
+                            right_indices.append(right_lr_filtered[1:-1])
+                        elif filt_where[0]==1:
+                            left_indices.append(left_rl_filtered[1:-1])
+                            right_indices.append(right_rl_filtered[1:-1])
+                        else:
+                            left_indices.append(left_filtered[ids_left])
+                            right_indices.append(right_filtered[ids_right])
+                        break
+                            
         
         
-        
-    left_indices.append(np.array([end_left]))
-    right_indices.append(np.array([end_right]))    
+    if end_left!=start_left and end_right!=start_right:    
+        left_indices.append(np.array([end_left]))
+        right_indices.append(np.array([end_right]))    
     
     start_left=left_id
     start_right=right_id
@@ -253,8 +305,8 @@ final_left=np.concatenate(left_indices)
 final_right=np.concatenate(right_indices)
 
 final_banks=np.stack((array_left[final_left],array_right[final_right]),axis=0)
-final_transects=banks=final_banks.swapaxes(0,1)
-
+final_transects=final_banks.swapaxes(0,1)
+"""
 
 skoro_kilometraz=np.linalg.norm(np.diff(final_banks, axis=1), axis=-1)
 
@@ -263,38 +315,66 @@ distances_between_transects=np.mean(skoro_kilometraz,axis=0)/1000
 cum_km=np.cumsum(distances_between_transects)
 
 cum_km0=np.insert(cum_km,0,0)
-
-
+print(cum_km0[-1])
+"""
 effective_widths=[]
 effective_transects=[]
+kilometrages=[]
 
 if multipolygon_islands !=None:
     for transect in final_transects:
         transect_linestring=LineString((transect))
         effective_transect=shapely.difference(transect_linestring,multipolygon_islands)
+        center_intersect=shapely.intersection(effective_transect,linestring_center[0])
+        kilometrage=linestring_center[0].project(center_intersect)
+        kilometrages.append(kilometrage)
         effective_transects.append(effective_transect)
         effective_widths.append(effective_transect.length)
 else:
     for transect in final_transects:
         effective_transect=LineString((transect))
+        center_intersect=shapely.intersection(effective_transect,linestring_center[0])
+        kilometrage=linestring_center[0].project(center_intersect)
+        kilometrages.append(kilometrage)
         effective_transects.append(effective_transect)
         effective_widths.append(effective_transect.length)
+        
+kilometrages_arr=np.array(kilometrages)
+effective_widths_arr=np.array(effective_widths)
 
-with fiona.open("results/final_transects.shp", 'w', 'ESRI Shapefile', schema_line) as c:
-    for line,km in zip(effective_transects,cum_km0):
+segment_size=200        
+center_segments,interval_widths=get_average_widths_for_segments(linestring_center[0],segment_size,effective_widths_arr,kilometrages_arr)
+
+with fiona.open("results/segmented_center_line.shp", 'w', 'ESRI Shapefile', schema_line) as c:
+    for line,m in zip(center_segments,interval_widths):
         c.write({
             'geometry': mapping(line),
-            'properties': {'width': line.length,'kilometrag':km}
+            'properties': {'width':m,'kilometrag':0}
         })
+    
+
+with fiona.open("results/final_transects.shp", 'w', 'ESRI Shapefile', schema_line) as c:
+    for line,km in zip(effective_transects,kilometrages):
+        c.write({
+            'geometry': mapping(line),
+            'properties': {'width': line.length,'kilometrag':km/1000}
+        })
+"""
+
+first_derivation=np.gradient(effective_widths,cum_km0)
+second_derivation=np.gradient(first_derivation,cum_km0)
+roll_avg=rolling_average(effective_widths,31)
 
 plt.title("River width") 
 plt.xlabel("kilometrage (km)") 
 plt.ylabel("river width (m)") 
 plt.plot(cum_km0,effective_widths)
-plt.grid() 
+plt.grid()
+
+plt.plot(cum_km0,second_derivation) 
 plt.show()
 
-"""
+
 transect_dict["combination"]=np.stack((array_left[final_left],array_right[final_right]),axis=1)
 
 
