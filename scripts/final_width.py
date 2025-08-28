@@ -1,13 +1,11 @@
 import fiona
 import os
 import shapely
-from math import sqrt,inf
+import math
 import numpy as np
 from shapely.geometry import shape, mapping, LineString, Point
-from shapely.ops import substring
-from matplotlib import pyplot as plt
 from sklearn.neighbors import NearestNeighbors
-import pandas as pd
+
 from scipy.optimize import linear_sum_assignment
 schema_line = {
     'geometry': 'LineString',
@@ -29,7 +27,7 @@ neigh = NearestNeighbors(n_neighbors=1)
 
 def convert_shp_to_linestrings(file):
     linestring_list=[]
-    with fiona.open(f"data/{file}.shp") as banks:
+    with fiona.open(f"important/miss/{file}.shp") as banks:
         for feature in banks:
             linestring_feature=shape(feature['geometry'])
             linestring_list.append(linestring_feature)
@@ -57,35 +55,50 @@ def export_points(arr,file):
             })
             
 def get_cross_products(entire_from_bank,chosen_from_indices,entire_to_bank,chosen_to_indices):
+    #vektorove souciny odpovidajich segmentu brehu a pricek
+    
+    #vektory po sobe jdoucich vrcholu celeho brehu ve smeru toku
     from_bank_vectors=entire_from_bank[1:] - entire_from_bank[:-1]
-    
+     
+    #pridani posledniho vektoru posledniho segmentu brehu na konec
     from_bank_vectors_plus_last=np.vstack((from_bank_vectors,from_bank_vectors[-1]))
-    from_bank_vectors_plus_first=np.vstack((from_bank_vectors[0],from_bank_vectors))
     
+    #pridani posledniho vektoru prvniho segmentu brehu na zacatek 
+    from_bank_vectors_plus_first=np.vstack((from_bank_vectors[0],from_bank_vectors)) 
+    
+    #smerove vektory pricek od vychoziho brehu
     transect_vectors=entire_to_bank[chosen_to_indices]-entire_from_bank[chosen_from_indices]
-    
+     
+    #vektorovy soucin
     cross_product1=np.cross(from_bank_vectors_plus_last[chosen_from_indices],transect_vectors)
-    cross_product2=np.cross(from_bank_vectors_plus_first[chosen_from_indices],transect_vectors)
+    
+    #druhy vektorovy soucin tak, abychom meli vektorovy soucin pro oba segmenty, meyi kterymi pricka vznikla 
+    cross_product2=np.cross(from_bank_vectors_plus_first[chosen_from_indices],transect_vectors) 
     
     return cross_product1,cross_product2
 
 def mask_for_right(cross_product1,cross_product2):
+    # maska pro pricky vychazejici z praveho brehu, jestli opravdu smeruji doleva
     mask=(cross_product1 > 0) & (cross_product2 > 0)
     return mask
 
 def mask_for_left(cross_product1,cross_product2):
+    # dtto pro levy breh
     mask=(cross_product1 < 0) & (cross_product2 < 0)
     return mask
 
 def get_duplicates(array1,array2):
+    # najde pricky, ktere se vyskutiju v obou stech, numpy nema 2d intersect, tak byla zvoleno np.unique
     all_values=np.concatenate((array1,array2),axis=0)
     unique_values,unique_count=np.unique(all_values,return_counts=True,axis=0)
     duplicates=unique_values[unique_count==2]
     return duplicates
 
 def get_unique_shortest(distances,pop_indices):
+    # odstraneni shluku
     unique_pop_indices = np.unique(pop_indices)
     closest_query_indices=[]
+    # iterace pres unikatni indexy vybrane na cilovem brehu a vybrani nejkratsi pricky, resp. jejiho indexu
     for pop_index in unique_pop_indices:
         indices_pop_indices = np.where(pop_indices == pop_index)[0]
         min_id=np.argmin(distances[indices_pop_indices])
@@ -95,6 +108,7 @@ def get_unique_shortest(distances,pop_indices):
     return closest_query_indices,unique_pop_indices
 
 def get_indices_onesided(queries,population):
+    # hledani nejblizsiho souseda (knihovna sci-kit), nasledny reshape
     neigh.fit(population)
     distances,indices_to=neigh.kneighbors(queries)
     distances=distances.reshape(-1,)
@@ -102,35 +116,32 @@ def get_indices_onesided(queries,population):
     return distances,indices_to
 
 def bank_to_bank (from_bank,to_bank):
+    # nejblizsi soused a odstrneni shluku, vrati indexy vrcholu na vychozim a cilovem brehu, dulezite poradi
     distances,indices_to=get_indices_onesided(from_bank,to_bank)
     closest_from_indices,unique_to_indices=get_unique_shortest(distances,indices_to)
     return closest_from_indices,unique_to_indices
 
 
 def find_optimal_unique_closest_vertices(left_bank, right_bank):
-    # Calculate the distance matrix
-    distances = np.linalg.norm(left_bank[:, np.newaxis] - right_bank, axis=2)
-    
-    # Use the linear sum assignment (Hungarian algorithm) to find the optimal assignment
-    row_ind, col_ind = linear_sum_assignment(distances)
 
-    # Return the indices of the closest vertices on the right bank and their corresponding distances
+    distances = np.linalg.norm(left_bank[:, np.newaxis] - right_bank, axis=2)
+    row_ind, col_ind = linear_sum_assignment(distances)
     return col_ind, row_ind
 
 
 def get_gaps(left,right):
-    
+    # spocita delku mezer pro vsechny dvojice vrcholu pricek na jednom brehu, pouzito pro useky mezi "dvojitymi prickami"
     left_gaps=np.linalg.norm((left[1:]-left[:-1]),axis=1)
     right_gaps=np.linalg.norm((right[1:]-right[:-1]),axis=1)
     all_gaps=np.concatenate((left_gaps,right_gaps))
     return all_gaps
 
-path_island = 'data/islands.shp'
+path_island = 'important/miss/islands.shp'
 isFile = os.path.isfile(path_island)    
 
 linestring_left=convert_shp_to_linestrings("left")
 linestring_right=convert_shp_to_linestrings("right")
-linestring_center=convert_shp_to_linestrings("line")
+#linestring_center=convert_shp_to_linestrings("line")
 if isFile==True:
     linestring_islands=convert_shp_to_linestrings("islands")
     island_polygons=shapely.polygonize(linestring_islands)
@@ -138,51 +149,24 @@ if isFile==True:
 else:
     multipolygon_islands=None
 
-array_left=segmentize_array(linestring_left[0],5)
-array_right=segmentize_array(linestring_right[0],5)
-
-def rolling_average(arr, window_size):
-    # Create the window (kernel) for averaging
-    window = np.ones(window_size) / window_size
-    
-    # Compute the convolution
-    return np.convolve(arr, window, mode='valid')
-
-def get_average_widths_for_segments(polyline, segment_length, widths, kilometrages):
-    i=0
-    segments=[]
-    average_widths=[]
-    while True:
-        segment=substring(polyline,i,i+segment_length)
-        if segment.length>0:
-            selected_kilometrages=np.where((kilometrages>i) & (kilometrages<(i+segment_length)))
-            average_width=np.mean(widths[selected_kilometrages])
-            average_widths.append(average_width)
-            segments.append(segment)
-            i+=segment_length
-        else:
-            return segments,average_widths
-
-
-"""
-with fiona.open(f"results/islands_polygons.shp", 'w', 'ESRI Shapefile', schema_multipolygon) as c:
-    c.write({
-        'geometry': mapping(multipolygon_islands),
-    })
-"""
-
+array_left=segmentize_array(linestring_left[0],200)
+array_right=segmentize_array(linestring_right[0],200)
 
 left_lr,right_lr=bank_to_bank(array_left,array_right)
-right_rl,left_rl=bank_to_bank(array_right,array_left)
-
 mask_lr=mask_for_left(*get_cross_products(array_left,left_lr,array_right,right_lr))
-mask_rl=mask_for_right(*get_cross_products(array_right,right_rl,array_left,left_rl))
-
 left_lr_masked=left_lr[mask_lr]
 right_lr_masked=right_lr[mask_lr]
 
+right_rl,left_rl=bank_to_bank(array_right,array_left)
+mask_rl=mask_for_right(*get_cross_products(array_right,right_rl,array_left,left_rl))
 left_rl_masked=left_rl[mask_rl]
 right_rl_masked=right_rl[mask_rl]
+
+lr_ids=np.stack((left_lr[mask_lr],right_lr[mask_lr]),axis=1)
+rl_ids=np.stack((left_rl[mask_rl],right_rl[mask_rl]),axis=1)
+
+duplicates=get_duplicates(lr_ids,rl_ids)
+left_duplicate_ids,right_duplicate_ids=np.swapaxes(duplicates,0,1)
 
 all_left=np.concatenate((left_lr_masked,left_rl_masked),axis=None)
 all_right=np.concatenate((right_lr_masked,right_rl_masked),axis=None)
@@ -192,13 +176,6 @@ all_right_sorted=np.sort(np.unique(all_right))
 
 print(len(all_left_sorted))
 print(len(all_right_sorted))
-
-
-lr_ids=np.stack((left_lr[mask_lr],right_lr[mask_lr]),axis=1)
-rl_ids=np.stack((left_rl[mask_rl],right_rl[mask_rl]),axis=1)
-
-duplicates=get_duplicates(lr_ids,rl_ids)
-left_duplicate_ids,right_duplicate_ids=np.swapaxes(duplicates,0,1)
 
 left_duplicate_ids_plus_end=np.concatenate((left_duplicate_ids,[all_left_sorted[-1]]),axis=0)
 right_duplicate_ids_plus_end=np.concatenate((right_duplicate_ids,[all_right_sorted[-1]]),axis=0)
@@ -306,17 +283,7 @@ final_right=np.concatenate(right_indices)
 
 final_banks=np.stack((array_left[final_left],array_right[final_right]),axis=0)
 final_transects=final_banks.swapaxes(0,1)
-"""
 
-skoro_kilometraz=np.linalg.norm(np.diff(final_banks, axis=1), axis=-1)
-
-distances_between_transects=np.mean(skoro_kilometraz,axis=0)/1000
-
-cum_km=np.cumsum(distances_between_transects)
-
-cum_km0=np.insert(cum_km,0,0)
-print(cum_km0[-1])
-"""
 effective_widths=[]
 effective_transects=[]
 kilometrages=[]
@@ -325,66 +292,44 @@ if multipolygon_islands !=None:
     for transect in final_transects:
         transect_linestring=LineString((transect))
         effective_transect=shapely.difference(transect_linestring,multipolygon_islands)
-        center_intersect=shapely.intersection(effective_transect,linestring_center[0])
-        kilometrage=linestring_center[0].project(center_intersect)
-        kilometrages.append(kilometrage)
+        #center_intersect=shapely.intersection(effective_transect,linestring_center[0])
+        #kilometrage=linestring_center[0].project(center_intersect)
+        #if math.isnan(kilometrage):
+            #continue
+        #kilometrages.append(kilometrage)
         effective_transects.append(effective_transect)
         effective_widths.append(effective_transect.length)
 else:
     for transect in final_transects:
         effective_transect=LineString((transect))
-        center_intersect=shapely.intersection(effective_transect,linestring_center[0])
-        kilometrage=linestring_center[0].project(center_intersect)
-        kilometrages.append(kilometrage)
+        #center_intersect=shapely.intersection(effective_transect,linestring_center[0])
+        #kilometrage=linestring_center[0].project(center_intersect)
+        #if math.isnan(kilometrage):
+            #continue
+        #kilometrages.append(kilometrage)
         effective_transects.append(effective_transect)
         effective_widths.append(effective_transect.length)
         
 kilometrages_arr=np.array(kilometrages)
 effective_widths_arr=np.array(effective_widths)
-
-segment_size=200        
-center_segments,interval_widths=get_average_widths_for_segments(linestring_center[0],segment_size,effective_widths_arr,kilometrages_arr)
-
-with fiona.open("results/segmented_center_line.shp", 'w', 'ESRI Shapefile', schema_line) as c:
-    for line,m in zip(center_segments,interval_widths):
-        c.write({
-            'geometry': mapping(line),
-            'properties': {'width':m,'kilometrag':0}
-        })
-    
-
+"""
 with fiona.open("results/final_transects.shp", 'w', 'ESRI Shapefile', schema_line) as c:
     for line,km in zip(effective_transects,kilometrages):
         c.write({
             'geometry': mapping(line),
             'properties': {'width': line.length,'kilometrag':km/1000}
+        })"""
+
+
+with fiona.open("important/miss/final_transects.shp", 'w', 'ESRI Shapefile', schema_line) as c:
+    for line in effective_transects:
+        c.write({
+            'geometry': mapping(line),
+            'properties': {'width': line.length}
         })
-"""
 
-first_derivation=np.gradient(effective_widths,cum_km0)
-second_derivation=np.gradient(first_derivation,cum_km0)
-roll_avg=rolling_average(effective_widths,31)
-
-plt.title("River width") 
-plt.xlabel("kilometrage (km)") 
-plt.ylabel("river width (m)") 
-plt.plot(cum_km0,effective_widths)
-plt.grid()
-
-plt.plot(cum_km0,second_derivation) 
-plt.show()
-
-
-transect_dict["combination"]=np.stack((array_left[final_left],array_right[final_right]),axis=1)
-
-
-
-transect_dict["duplos"]=np.stack((array_left[left_duplicate_ids],array_right[right_duplicate_ids]),axis=1)
-
-transect_dict["left_to_right"]=np.stack((array_left[left_lr_masked],array_right[right_lr_masked]),axis=1)
-
-transect_dict["right_to_left"]=np.stack((array_left[left_rl_masked],array_right[right_rl_masked]),axis=1)
-"""
+np.save(f'kilometrages.npy', kilometrages_arr)
+np.save(f'widths.npy', effective_widths_arr)
 
 for key,value in transect_dict.items():
     export_line(value,key)
